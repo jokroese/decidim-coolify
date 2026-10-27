@@ -1,0 +1,127 @@
+name: Container image
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and smoke-test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # First deployment target: x86-64 AMD on Hetzner CPX41.
+          - arch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          # Native ARM64 CI is portability coverage; production starts on x86-64.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Validate deployment contract
+        run: |
+          python3 validate.py --allow-unpublished-image
+          python3 -m unittest discover -s tests -p "test_*.py"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image and check upstream migration completeness
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: decidim-coolify:test
+          load: true
+          cache-from: type=gha,scope=smoke-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=smoke-${{ matrix.arch }}
+
+      - name: Test migration completeness failure cases
+        run: |
+          docker run --rm --network none --entrypoint bundle \
+            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+            decidim-coolify:test exec ruby /tests/migration_completeness_test.rb
+
+      - name: Smoke-test image
+        run: python3 tests/smoke.py
+        env:
+          SMOKE_IMAGE: decidim-coolify:test
+
+  publish:
+    name: Publish versioned multi-architecture image
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Derive GHCR image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish multi-architecture image
+        id: publish
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=publish
+          cache-to: type=gha,mode=max,scope=publish
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          sbom: true
+          provenance: mode=max
+
+
+      - name: Report image for the deployment commit
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          printf '## Published application image\n\n`%s@%s`\n\n' "$IMAGE_NAME" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Smoke-test this digest, set x-app-image in compose.yaml, validate and commit the deployment configuration.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Publication does not deploy. Use the manual maintenance procedure in docs/OPERATIONS.md.' >> "$GITHUB_STEP_SUMMARY"
