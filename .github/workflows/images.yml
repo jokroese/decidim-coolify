@@ -2,6 +2,7 @@ name: Container image
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -62,6 +63,12 @@ jobs:
             --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
             decidim-coolify:test exec ruby /tests/migration_completeness_test.rb
 
+      - name: Test first-run configuration
+        run: |
+          docker run --rm --network none --entrypoint ruby \
+            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+            decidim-coolify:test /tests/deployment_configuration_test.rb
+
       - name: Smoke-test image
         run: python3 tests/smoke.py
         env:
@@ -69,7 +76,7 @@ jobs:
 
   publish:
     name: Publish versioned multi-architecture image
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     needs: test
     runs-on: ubuntu-24.04
     permissions:
@@ -89,6 +96,20 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Select immutable source and optional version tags
+        id: tags
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+        run: |
+          {
+            echo 'values<<TAGS'
+            echo "$IMAGE_NAME:sha-$GITHUB_SHA"
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "$IMAGE_NAME:$GITHUB_REF_NAME"
+            fi
+            echo 'TAGS'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -104,9 +125,7 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
-            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          tags: ${{ steps.tags.outputs.values }}
           cache-from: type=gha,scope=publish
           cache-to: type=gha,mode=max,scope=publish
           labels: |
@@ -117,11 +136,26 @@ jobs:
           provenance: mode=max
 
 
+      - name: Prepare pinned deployment configuration
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          python3 pin_release.py "$IMAGE_NAME@$IMAGE_DIGEST"
+          python3 validate.py
+
+      - name: Upload deployment configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-compose
+          path: compose.yaml
+          if-no-files-found: error
+
       - name: Report image for the deployment commit
         env:
           IMAGE_NAME: ${{ steps.image.outputs.name }}
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
         run: |
           printf '## Published application image\n\n`%s@%s`\n\n' "$IMAGE_NAME" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' 'Smoke-test this digest, set x-app-image in compose.yaml, validate and commit the deployment configuration.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Download the deployment-compose artefact for the pinned Compose file. Smoke-test the digest, make the package public and commit the reviewed deployment configuration.' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' 'Publication does not deploy. Use the manual maintenance procedure in docs/OPERATIONS.md.' >> "$GITHUB_STEP_SUMMARY"

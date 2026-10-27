@@ -1,46 +1,63 @@
 # Decidim for Coolify
 
-Run a Decidim participation site for your collective on Coolify.
+Run a Decidim participation site for your collective on Coolify. Start with a domain and an administrator email; connect your email provider afterwards.
 
-**Not ready for self-service setup yet.** There is no deployable release pinned in this repository. Setup and recovery still need testing on Coolify. [Developers: help finish this work](CONTRIBUTING.md#help-make-setup-ready).
+Coolify pulls a prebuilt application image. Collectives do not need to compile Decidim or publish an image themselves.
 
-## Before you begin
+**Maintainer prerequisite:** the first image still needs publishing and its digest pinning in `compose.yaml`. The current unpublished marker cannot be deployed. This is a one-off release task for the project, not a setup step for each collective. [Publish the first release](CONTRIBUTING.md#publishing-a-release).
 
-For a pilot installation, arrange:
-
-- A technical helper and a published release they have checked.
-- Access to Coolify with a server connected.
-- A domain pointing to that server, such as `participate.example.org`.
-- An email provider's SMTP settings and an approved sender address.
-- A backup destination outside the server. Your helper must test [backup and recovery](docs/OPERATIONS.md) before participants join.
+**Pilot setup:** public routing, real email delivery and recovery still need verification on Coolify. [Verification status](VERIFICATION.md).
 
 ## Set up
 
-These steps are for a pilot with your technical helper, once a release is available.
+1. Add an **Application from a Git repository**. Select **Docker Compose**, base directory `/` and Compose file `compose.yaml`. Leave **Raw Compose**, **Auto Deploy** and production previews off. Save and load the configuration.
+2. Under **Access → Public access**, add a domain for **web**:
 
-1. In Coolify, add an **Application from a Git repository**, using the repository and deployment branch supplied by your helper. Select **Docker Compose**, base directory `/` and Compose file `compose.yaml`. Leave **Raw Compose**, **Auto Deploy** and production previews off. Save and load the configuration.
-2. Set the **web** domain to `https://participate.example.org:3000`, replacing the hostname with yours. Visitors will use `https://participate.example.org`.
-3. In **Environment Variables**, enter:
-
-   | Setting | What to enter |
+   | Field | Value |
    | --- | --- |
-   | `SYSTEM_ADMIN_EMAIL` | Your initial site administrator's email address |
-   | `DECIDIM_MAILER_SENDER` | The sender address approved by your email provider |
-   | `SMTP_ADDRESS` | Your provider's outgoing mail server |
-   | `SMTP_DOMAIN` | The domain your provider requires for the SMTP greeting |
-   | `SMTP_USERNAME` | Your email provider's SMTP username |
-   | `SMTP_PASSWORD` | Your email provider's SMTP password |
+   | Protocol | `https` |
+   | Domain | Your hostname, such as `participate.example.org` |
+   | Port | `3000` |
+   | Path | Empty |
 
-   Email uses STARTTLS on port 587. If your provider requires TLS on port 465, also set `SMTP_TLS=true` and `SMTP_PORT=465`.
-4. Keep Coolify's generated credentials. Have your helper confirm the deployment revision and save the credentials for recovery, then **Deploy**. Wait for all five components to show healthy.
-5. Open `https://participate.example.org/system`. Sign in with `SYSTEM_ADMIN_EMAIL` and the `SERVICE_PASSWORD_64_ADMIN` value from Coolify. Change your password.
-6. Create your organisation with hostname `participate.example.org`, without `https://`. Set its name, languages and sender address. Invite an organisation administrator and follow the invitation email to sign in.
-7. Upload an organisation logo, save it and check that it appears on the public site. Ask your helper to confirm background jobs and backups work before inviting participants.
+   Point the hostname's DNS to your Coolify server and save. If your version uses a single domain field, enter `https://participate.example.org:3000`. Visitors use `https://participate.example.org`.
+3. In **Environment Variables**, set **`SYSTEM_ADMIN_EMAIL`** to your email address. Keep Coolify's generated credentials unchanged. Save them securely for recovery.
+4. **Deploy**. Coolify pulls the pinned image and starts all five components. Wait until they are healthy.
+5. Open `https://participate.example.org/system`. Sign in with `SYSTEM_ADMIN_EMAIL` and the generated **`SERVICE_PASSWORD_64_ADMIN`** value in Coolify. Change your password.
+6. Create your organisation with hostname `participate.example.org`, without `https://`. Set its name, languages and sender address. Complete email setup below before sending administrator invitations or inviting participants.
 
-Coolify labels can vary by version; its [Compose guide](https://coolify.io/docs/applications/builds/docker-compose) illustrates the controls.
+The administrator screens show **Email setup is pending** until SMTP is configured. You can sign in and create an organisation, but invitations, password resets and notifications cannot be delivered. Delivery attempts fail explicitly and background jobs can retry; they are not silently discarded.
 
-## After setup
+Coolify should supply the public URL from the web domain. If startup reports a missing URL despite a saved domain, set **`APP_URL=https://participate.example.org`** in Environment Variables, without `:3000`. This is a fallback for missing generated configuration; it does not create a proxy route.
+
+## Connect email
+
+In Coolify's **Environment Variables**, set:
+
+| Setting | What to enter |
+| --- | --- |
+| `SMTP_ADDRESS` | Your provider's outgoing mail server |
+| `SMTP_USERNAME` | Your provider's SMTP username |
+| `SMTP_PASSWORD` | Your provider's SMTP password |
+
+The default sender is `no-reply@YOUR-SITE-HOSTNAME`. Your provider must authorise that address, or you must set **`DECIDIM_MAILER_SENDER`** to an address it permits. Also use an authorised sender in the Decidim organisation settings. **`SMTP_DOMAIN`** defaults to the site hostname; override it if your provider requires a different greeting domain.
+
+Email uses STARTTLS on port 587. For a provider requiring implicit TLS on port 465, set **`SMTP_TLS=true`** and **`SMTP_PORT=465`**.
+
+Save and redeploy. The setup notice disappears once all three SMTP settings are present; this does not confirm that the provider accepts them. Send an organisation administrator invitation and verify that it arrives before inviting participants. If you need to return to setup without email, clear all three SMTP settings together.
+
+## Updating an existing first attempt
+
+Load the updated Git Compose configuration in Coolify after the maintainer pins the published image, so it picks up the deployable image and optional mail settings. Preserve your saved web domain, generated credentials and volumes. Previously entered SMTP values are retained: either complete them or clear all three SMTP settings for initial setup.
+
+If startup cannot proceed, the **web runtime log** lists the settings needing attention together. This replaces repeated Compose errors for the domain, administrator email and mail settings. Database, Redis and encryption credentials must still be generated by Coolify.
+
+## Before participants join
+
+Check real email delivery, background jobs and an uploaded organisation logo. Arrange encrypted backups outside the server and test [backup and recovery](docs/OPERATIONS.md) with a technical helper.
 
 [Look after your site and get help](OPERATIONS.md).
 
 [Help develop this project](CONTRIBUTING.md).
+
+[Coolify's Compose guide](https://coolify.io/docs/applications/builds/docker-compose) explains routing and generated variables; labels can vary by version.

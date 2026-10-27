@@ -19,14 +19,14 @@ x-app-environment: &app-environment
   DATABASE_URL: postgres://${SERVICE_USER_DATABASE:?Coolify must generate the database user}:${SERVICE_PASSWORD_64_DATABASE:?Coolify must generate the database password}@database:5432/decidim
   REDIS_URL: redis://:${SERVICE_PASSWORD_64_REDIS:?Coolify must generate the Redis password}@redis:6379/0
   QUEUE_ADAPTER: sidekiq
-  APP_URL: ${SERVICE_URL_WEB_3000:?Set the public web URL in Coolify}
+  APP_URL: ${APP_URL:-${SERVICE_URL_WEB_3000:-}}
   DECIDIM_APPLICATION_NAME: ${DECIDIM_APPLICATION_NAME:-Community participation}
-  DECIDIM_MAILER_SENDER: ${DECIDIM_MAILER_SENDER:?Set the sender address}
-  SMTP_ADDRESS: ${SMTP_ADDRESS:?Set the SMTP hostname}
+  DECIDIM_MAILER_SENDER: ${DECIDIM_MAILER_SENDER:-}
+  SMTP_ADDRESS: ${SMTP_ADDRESS:-}
   SMTP_PORT: ${SMTP_PORT:-587}
-  SMTP_DOMAIN: ${SMTP_DOMAIN:?Set the SMTP domain}
-  SMTP_USERNAME: ${SMTP_USERNAME:?Set the SMTP username}
-  SMTP_PASSWORD: ${SMTP_PASSWORD:?Set the SMTP password}
+  SMTP_DOMAIN: ${SMTP_DOMAIN:-}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   SMTP_AUTHENTICATION: ${SMTP_AUTHENTICATION:-plain}
   SMTP_TLS: ${SMTP_TLS:-false}
 
@@ -40,7 +40,7 @@ services:
     environment:
       <<: *app-environment
       SERVICE_URL_WEB_3000: /
-      SYSTEM_ADMIN_EMAIL: ${SYSTEM_ADMIN_EMAIL:?Set the initial system administrator email}
+      SYSTEM_ADMIN_EMAIL: ${SYSTEM_ADMIN_EMAIL:-}
       INITIAL_SYSTEM_ADMIN_PASSWORD: ${SERVICE_PASSWORD_64_ADMIN:?Coolify must generate the initial administrator password}
     expose:
       - "3000"
