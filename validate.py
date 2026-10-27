@@ -48,8 +48,7 @@ def environment_fixture() -> dict[str, str]:
         "DECIDIM_APPLICATION_NAME": "Disposable validation",
         "DECIDIM_MAILER_SENDER": "test@example.invalid",
         "SERVICE_USER_DATABASE": "fixtureuser",
-        "SERVICE_URL_WEB_3000": "https://example.invalid",
-        "APP_URL": "",
+        "SERVICE_URL_WEB": "https://example.invalid",
         "SERVICE_FQDN_WEB_3000": "example.invalid",
         "SMTP_ADDRESS": "smtp.example.invalid",
         "SMTP_DOMAIN": "example.invalid",
@@ -108,6 +107,8 @@ def validate_config(config: dict, *, allow_unpublished: bool = False) -> None:
     image = match.group(1)
     validate_image_reference(image, allow_unpublished=allow_unpublished)
     require(source.count("<<: *app-image") == 3, "All three app roles must use the image anchor")
+    require("APP_URL" not in compose_variable_names(),
+            "The public URL must follow the Coolify web domain, not a separate saved APP_URL")
     require("DECIDIM_IMAGE" not in compose_variable_names(), "The production image must be owned by Git")
     services = config.get("services", {})
     require(set(services) == EXPECTED_SERVICES,

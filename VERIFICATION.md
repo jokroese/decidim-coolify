@@ -9,7 +9,7 @@ For developers preparing releases and technical helpers assessing deployment rea
 | Latest Linux amd64 image | Release CI and full smoke tests against the anonymously pulled published digest passed. |
 | Latest Linux ARM64 image | Release CI and full smoke tests against the anonymously pulled published digest passed. |
 | Published release | `v0.1.0-rc.1` is published to public GHCR for both architectures; Compose pins its version and digest. |
-| Coolify deployment | Not verified on a target instance. |
+| Coolify deployment | First target attempt fetched `6544f71` and reached healthy PostgreSQL/Redis, then web rejected its URL/admin configuration. Successful target deployment is not yet verified. |
 | Real email and organisation onboarding | Not verified on a deployed site. |
 | Backups and recovery | No verified automated backup schedule or isolated recovery rehearsal. |
 
@@ -18,6 +18,18 @@ For developers preparing releases and technical helpers assessing deployment rea
 Follow [Help make setup ready](CONTRIBUTING.md#help-make-setup-ready). Record the tested source revision, image digest, architecture and Coolify version with each new result. A passing local smoke test does not establish working public HTTPS, real email delivery or recovery.
 
 ## Recorded evidence
+
+### Domain source and required settings — 28 October 2026
+
+The first target deployment demonstrated that a passing Docker smoke test did not establish a usable Coolify setup. Its deployment log hid web's configuration error behind an unhealthy dependency. The user had saved the intended domain, but the separate `APP_URL` setting still displayed Coolify's generated hostname with internal port 3000; the runtime error also reported a missing administrator email. The displayed URL alone would pass the existing syntax validator, so the exact failed container's URL remains unconfirmed.
+
+The revised Compose definition maps runtime `APP_URL` directly from Coolify's base `SERVICE_URL_WEB` and marks that generated value and `SYSTEM_ADMIN_EMAIL` required with native Compose diagnostics. The port-specific declaration remains on web for routing. No new image or custom setup service is required.
+
+- Compose validation and all 12 Python tests passed, including unset/empty required values, a stale saved `APP_URL`, a port-suffixed generated value and a domain change reaching all three application roles.
+- Reviewed Coolify's upstream Application parser and `syncComposeServiceUrlVariables`: base URL variables derive from the saved domain without the internal port; port-suffixed variants include that port. These source checks do not establish the installed Coolify version's behaviour.
+- A generated wildcard hostname can satisfy the URL requirement. The installer still selects or confirms the intended web domain.
+- The revised clean-install and domain-change flows still need verification on the target Coolify instance. The next target test must use the documented domain/email inputs, without an `APP_URL` workaround.
+
 
 ### First public image — 28 October 2026
 

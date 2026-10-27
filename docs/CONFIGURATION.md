@@ -6,7 +6,7 @@ For developers and technical helpers. Collectives can use the required settings 
 
 ## First-run settings
 
-Set `SYSTEM_ADMIN_EMAIL` to the initial system administrator's email address, and configure the web domain as described below. The administrator is created only if no system administrator exists. Changing the bootstrap settings does not change an existing account.
+Set the required `SYSTEM_ADMIN_EMAIL` to the initial system administrator's email address, and configure the web domain as described below. Compose rejects an empty administrator email or generated public URL before starting containers. The administrator is created only if no system administrator exists. Changing the bootstrap settings does not change an existing account.
 
 Email is optional for initial setup. Leave `SMTP_ADDRESS`, `SMTP_USERNAME` and `SMTP_PASSWORD` empty together. When any is supplied, all three are required. The startup check reports incomplete settings together before loading Rails. With no SMTP settings, the system administrator screens show a notice and email delivery raises an explicit error; queued delivery jobs can retry after configuration is completed. It does not use a log-only or silently successful mail backend.
 
@@ -24,7 +24,11 @@ Completing these settings enables SMTP; it does not prove deliverability. Test a
 
 ## Domain
 
-Under Access → Public access, select web, protocol https, the hostname, port 3000 and an empty path. The `SERVICE_URL_WEB_3000: /` declaration in Compose lets Coolify generate the URL used by `APP_URL`. Keep that declaration unchanged. If Coolify has no generated URL despite a saved web domain, set `APP_URL` explicitly to the public HTTPS origin. An explicit value takes precedence and must be kept in sync with the domain. It does not configure routing. Confirm that the resulting public URL has the correct HTTPS hostname and no application path; port 3000 is the proxy's internal target, not the visitor's port.
+Under Access → Public access, select web, protocol https, the hostname, port 3000 and an empty path. The `SERVICE_URL_WEB_3000: /` declaration associates the web component with its internal proxy port. The application’s `APP_URL` reads the base `SERVICE_URL_WEB` variable directly: Coolify derives this public URL from the saved web domain without appending the internal port. There is no separate editable `APP_URL` input and no nested default to retain an old address.
+
+Keep the generated URL declaration unchanged. Changing the web domain and redeploying should update all three application roles. Existing saved `APP_URL` entries are no longer used by the Compose mapping. For local Compose only, supply `SERVICE_URL_WEB` in the disposable environment as shown in `.env.example`; Docker does not generate Coolify variables.
+
+If a saved domain is missing or incorrect in the effective `SERVICE_URL_WEB`, inspect the source and deployable Compose views and record the installed Coolify version. This is a domain-generation problem to investigate, not a reason to ask every installer to maintain duplicate URLs.
 
 The application accepts one canonical hostname. Use the same hostname, without the scheme, when creating the Decidim organisation. See [Coolify's Compose routing documentation](https://coolify.io/docs/applications/builds/docker-compose).
 
