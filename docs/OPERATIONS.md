@@ -6,7 +6,7 @@ These procedures require Docker Compose and server administration experience. Th
 
 ## Before the first installation
 
-The maintainer must [publish and pin a release](../CONTRIBUTING.md#publishing-a-release). The image marker currently in `compose.yaml` cannot be deployed.
+The deployment configuration pins a published image by version and digest. Coolify can pull it anonymously for Linux amd64 or ARM64. Maintainers follow the [release procedure](../CONTRIBUTING.md#publishing-a-release) for subsequent versions; collectives do not build or publish images.
 
 On the target Coolify instance, verify the [setup instructions](../README.md#set-up), generated variables, persistent volumes and public HTTPS route. Record the Coolify version, deployment revision and supported server architecture. No minimum server capacity has been established.
 

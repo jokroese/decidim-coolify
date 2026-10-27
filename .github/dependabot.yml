@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: daily
+    allow:
+      - dependency-name: jokroese/decidim-coolify
+    # Our own release images have already passed both architecture test jobs.
+    cooldown:
+      exclude:
+        - jokroese/decidim-coolify
+    commit-message:
+      prefix: build(coolify)

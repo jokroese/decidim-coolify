@@ -60,6 +60,6 @@ Include current credentials and all four Rails secrets in encrypted backups. Los
 
 ## Settings owned by the repository
 
-The shared `x-app-image` anchor pins all three application roles to one published digest. The maintainer publishes and pins each release once; every collective can then pull it without compiling Decidim. Change the digest through a reviewed deployment commit, not a Coolify environment variable.
+The shared `x-app-image` anchor pins all three application roles to one published digest. Dependabot proposes version and digest updates after maintainers publish a release; every collective can then pull it without compiling Decidim. Change the digest through a reviewed deployment commit, not a Coolify environment variable.
 
 PostgreSQL 17, Redis 8, local uploaded-file storage, non-root UID 1000, health checks and service dependencies are defined by the image and Compose file. Database and Redis have no published host ports. Run exactly one scheduler. Its tasks use UTC and run daily, weekly or every 15 minutes; see [crontab](../docker/crontab).

@@ -126,7 +126,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.values }}
-          cache-from: type=gha,scope=publish
+          # Reuse the native builds that passed the test jobs, as well as any
+          # previous publication cache. Cache misses still rebuild normally.
+          cache-from: |
+            type=gha,scope=publish
+            type=gha,scope=smoke-amd64
+            type=gha,scope=smoke-arm64
           cache-to: type=gha,mode=max,scope=publish
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -141,7 +146,12 @@ jobs:
           IMAGE_NAME: ${{ steps.image.outputs.name }}
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
         run: |
-          python3 pin_release.py "$IMAGE_NAME@$IMAGE_DIGEST"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            image_ref="$IMAGE_NAME:$GITHUB_REF_NAME@$IMAGE_DIGEST"
+          else
+            image_ref="$IMAGE_NAME:sha-$GITHUB_SHA@$IMAGE_DIGEST"
+          fi
+          python3 pin_release.py "$image_ref"
           python3 validate.py
 
       - name: Upload deployment configuration
@@ -157,5 +167,5 @@ jobs:
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
         run: |
           printf '## Published application image\n\n`%s@%s`\n\n' "$IMAGE_NAME" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' 'Download the deployment-compose artefact for the pinned Compose file. Smoke-test the digest, make the package public and commit the reviewed deployment configuration.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Dependabot checks version-tagged releases on its configured schedule and proposes the version and digest update. Review and merge its PR. The deployment-compose artefact is also available for recovery or a standalone installation.' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' 'Publication does not deploy. Use the manual maintenance procedure in docs/OPERATIONS.md.' >> "$GITHUB_STEP_SUMMARY"

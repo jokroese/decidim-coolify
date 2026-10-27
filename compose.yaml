@@ -1,8 +1,7 @@
 # Git-backed Coolify Application; deploy manually from a reviewed Git revision.
-# Replace this unpublished marker with the verified GHCR image digest after CI
-# publishes it, then commit the change. All app roles use this one reference.
-# registry.invalid deliberately cannot serve an image. See README.md.
-x-app-image: &app-image registry.invalid/decidim-coolify:unpublished
+# Dependabot proposes version and digest updates for this shared image mapping.
+x-app-image: &app-image
+  image: ghcr.io/jokroese/decidim-coolify:v0.1.0-rc.1@sha256:3ec809133f230ee7ddd2aa28ea80fc9c13e16ffc83d84f462e70e1b30247598a
 
 x-app-environment: &app-environment
   RAILS_ENV: production
@@ -32,7 +31,7 @@ x-app-environment: &app-environment
 
 services:
   web:
-    image: *app-image
+    <<: *app-image
     restart: unless-stopped
     init: true
     working_dir: /app
@@ -65,7 +64,7 @@ services:
         max-file: "3"
 
   worker:
-    image: *app-image
+    <<: *app-image
     restart: unless-stopped
     init: true
     working_dir: /app
@@ -88,7 +87,7 @@ services:
     logging: *logging
 
   scheduler:
-    image: *app-image
+    <<: *app-image
     restart: unless-stopped
     init: true
     working_dir: /app

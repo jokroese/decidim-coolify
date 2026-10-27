@@ -9,8 +9,8 @@ from validate import validate_image_reference
 
 def pin(source: str, image: str) -> str:
     validate_image_reference(image)
-    updated, count = re.subn(r"^x-app-image: &app-image \S+$",
-                             "x-app-image: &app-image " + image, source, flags=re.MULTILINE)
+    updated, count = re.subn(r"^x-app-image: &app-image\n  image: \S+$",
+                             "x-app-image: &app-image\n  image: " + image, source, flags=re.MULTILINE)
     if count != 1:
         raise RuntimeError("Expected exactly one x-app-image anchor")
     return updated

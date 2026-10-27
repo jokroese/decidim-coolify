@@ -25,7 +25,7 @@ UNPUBLISHED_IMAGE = "registry.invalid/decidim-coolify:unpublished"
 def validate_image_reference(image: str, *, allow_unpublished: bool = False) -> None:
     if image == UNPUBLISHED_IMAGE and allow_unpublished:
         return
-    if not re.fullmatch(r"ghcr\.io/[a-z0-9._-]+/[a-z0-9._/-]+@sha256:[a-f0-9]{64}", image):
+    if not re.fullmatch(r"ghcr\.io/[a-z0-9._-]+/[a-z0-9._/-]+(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}", image):
         raise RuntimeError("Pin x-app-image in compose.yaml to the published GHCR digest before deployment. "
                            "--allow-unpublished-image permits only the initial marker for development/CI.")
 
@@ -103,11 +103,11 @@ def require(condition: bool, message: str) -> None:
 
 def validate_config(config: dict, *, allow_unpublished: bool = False) -> None:
     source = COMPOSE.read_text()
-    match = re.search(r"^x-app-image: &app-image (\S+)$", source, re.MULTILINE)
+    match = re.search(r"^x-app-image: &app-image\n  image: (\S+)$", source, re.MULTILINE)
     require(match is not None, "Declare one literal x-app-image anchor in compose.yaml")
     image = match.group(1)
     validate_image_reference(image, allow_unpublished=allow_unpublished)
-    require(source.count("image: *app-image") == 3, "All three app roles must use the image anchor")
+    require(source.count("<<: *app-image") == 3, "All three app roles must use the image anchor")
     require("DECIDIM_IMAGE" not in compose_variable_names(), "The production image must be owned by Git")
     services = config.get("services", {})
     require(set(services) == EXPECTED_SERVICES,
