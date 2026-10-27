@@ -2,13 +2,13 @@
 
 For developers preparing releases and technical helpers assessing deployment readiness. This records test evidence, not setup instructions.
 
-## Current status — 27 October 2026
+## Current status — 28 October 2026
 
 | Area | Recorded result |
 | --- | --- |
-| Latest Linux amd64 image | Local build and full smoke test passed for optional-email first-run setup, including adding SMTP and restarting with persisted data. |
-| Latest Linux ARM64 image | CI passed for `a51c8a7`; the new first-run changes still need remote ARM64 checks. |
-| Published release | CI passed for both architectures at `a51c8a7`; publication was skipped. Compose still has the unpublished marker pending the first release. |
+| Latest Linux amd64 image | Release CI and full smoke tests against the anonymously pulled published digest passed. |
+| Latest Linux ARM64 image | Release CI and full smoke tests against the anonymously pulled published digest passed. |
+| Published release | `v0.1.0-rc.1` is published to public GHCR for both architectures; Compose pins its version and digest. |
 | Coolify deployment | Not verified on a target instance. |
 | Real email and organisation onboarding | Not verified on a deployed site. |
 | Backups and recovery | No verified automated backup schedule or isolated recovery rehearsal. |
@@ -19,9 +19,20 @@ Follow [Help make setup ready](CONTRIBUTING.md#help-make-setup-ready). Record th
 
 ## Recorded evidence
 
+### First public image — 28 October 2026
+
+[Release CI run 40592231575](https://github.com/jokroese/decidim-coolify/actions/runs/40592231575) passed native amd64 and ARM64 builds, migration/configuration tests and full smoke tests, then published `v0.1.0-rc.1` from source revision `7a95f089ccfbd91171b48f5748628f5af9203aa8`.
+
+- Published image: `ghcr.io/jokroese/decidim-coolify:v0.1.0-rc.1@sha256:3ec809133f230ee7ddd2aa28ea80fc9c13e16ffc83d84f462e70e1b30247598a`.
+- Anonymous manifest inspection and pulls succeeded for both Linux architectures with an isolated Docker configuration containing no credentials.
+- Full smoke tests against that published digest passed for both `SMOKE_PLATFORM=linux/amd64` and `SMOKE_PLATFORM=linux/arm64`. The amd64 check ran under emulation on Apple Silicon.
+- Both runs verified all five healthy services, initial setup without SMTP, enabling SMTP configuration without losing administrator state, migrations, API documentation and assets, scheduled execution, encrypted uploads surviving restarts and Sidekiq processing. Real email was not sent.
+- The disposable smoke projects `decidim-smoke-99b4eac96b` and `decidim-smoke-34a40a2bd4` were removed with their volumes.
+- The release deployment reference is committed separately from the image's source tag. No Coolify deployment or live recovery rehearsal has been performed.
+
 ### Simpler first-run setup — 27 October 2026
 
-The default deployment still pulls one digest-pinned GHCR image for all three app roles. No source build was added to the deployment definition. The first release remains unpublished; these changes have not been deployed to Coolify.
+The default deployment still pulls one digest-pinned GHCR image for all three app roles. No source build was added to the deployment definition. At the time of these local checks, the first release was unpublished. These changes have not been deployed to Coolify.
 
 - `docker build --platform linux/amd64 -t decidim-coolify:first-run-test .` passed, including upstream migration checks, API documentation and asset compilation. Docker reported image identifier `sha256:a2ff42fbb99665a8c1896aba3409e62df0e8e4da1f54e4d8ee16c8a955aef2de`.
 - Compose validation with the development marker exception and all 10 Python configuration/release tests passed.

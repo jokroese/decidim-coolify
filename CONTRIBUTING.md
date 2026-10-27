@@ -125,10 +125,20 @@ For maintainers with repository and registry publishing access. Publish and pin 
 2. Once this workflow is on the default branch, run **Container image → Run workflow** on the reviewed source revision, or push a reviewed `v*` release tag. Wait for both architecture test jobs and the publication job to succeed. The workflow publishes a commit SHA tag, an SBOM and provenance; version-tag runs also publish the version tag. Pushes to `main` only build and test. The `.dockerbuild` artefacts are diagnostic build records, not pullable images.
 3. Make the package public so collectives can pull it without registry credentials. For a private pilot, configure registry access in Coolify instead.
 4. Copy the complete `ghcr.io/OWNER/REPOSITORY@sha256:…` reference from the workflow summary. Set `SMOKE_IMAGE` to that actual reference and run `tests/smoke.py` for each supported architecture, setting `SMOKE_PLATFORM` accordingly. The example ellipsis is not a usable digest.
-5. Download the `deployment-compose` artefact from the publication run. It contains the matching Compose file with `x-app-image` already pinned to the published digest. Review it against the source revision and use it as `compose.yaml` in the deployment branch. Run `python3 validate.py` without the development exception, then commit and review the deployment configuration. This commit does not need another image-release tag. Compose-only changes can retain the existing image digest.
+5. Dependabot checks for new versions on its daily weekday schedule and opens a PR updating the shared image's version tag and digest. Review the release notes, published-image smoke results and PR checks, then merge it. No image reference needs copying into Compose. The `deployment-compose` artefact remains available for a standalone installation. This deployment commit does not need another image-release tag.
 6. Give the technical helper the repository URL, deployment branch, exact deployment commit and release notes. Include required settings or migration actions. They follow the [manual deployment procedure](docs/OPERATIONS.md#deploying-a-reviewed-upgrade).
 
-For the first release, complete the readiness work above before removing the README's status notice. Keep the [verification record](VERIFICATION.md) current, with revision/image, architecture, commands, results and remaining limits.
+### Automatic image updates
+
+[Dependabot](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-version-updates) is GitHub's maintained dependency-update service. The [.github/dependabot.yml](.github/dependabot.yml) configuration enables its Docker Compose support when present on the default branch. It checks only this project's application image; PostgreSQL and Redis upgrades remain separate maintenance work. It needs no custom updater, personal access token or extra GitHub Actions write permissions.
+
+Publish versioned tags such as `v0.1.0-rc.2` or `v0.1.0` for updates to be discoverable. Commit-SHA tags from manual publication are available for testing and do not define a release sequence. Keep both the readable version tag and immutable digest in Compose: Dependabot uses the tag to identify newer versions and updates the digest with it. The shared mapping keeps all three application roles on the same image.
+
+Dependabot preserves Docker tag families. While this pilot uses `-rc`, it follows later `-rc` tags. Moving to the first stable release is one reviewed change to the version and digest in the shared mapping; subsequent stable releases are proposed automatically. See [Dependabot’s tag policy](https://github.com/dependabot/dependabot-core/tree/main/docker#supported-tag-schemas).
+
+Checks run daily on weekdays; publication does not create a PR immediately. This project's own image is excluded from Dependabot's cooldown because publication already requires both architecture tests. To check sooner or inspect a failure, open **Insights → Dependency graph → Dependabot**, select the Docker Compose update job and use **Check for updates**. Dependabot PRs run the normal pull-request CI. Review and merging remain required; Coolify deployment remains manual.
+
+Keep the [verification record](VERIFICATION.md) current, with revision/image, architecture, commands, results and remaining limits.
 
 ## Technical references
 
