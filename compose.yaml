@@ -18,7 +18,8 @@ x-app-environment: &app-environment
   DATABASE_URL: postgres://${SERVICE_USER_DATABASE:?Coolify must generate the database user}:${SERVICE_PASSWORD_64_DATABASE:?Coolify must generate the database password}@database:5432/decidim
   REDIS_URL: redis://:${SERVICE_PASSWORD_64_REDIS:?Coolify must generate the Redis password}@redis:6379/0
   QUEUE_ADAPTER: sidekiq
-  APP_URL: ${APP_URL:-${SERVICE_URL_WEB_3000:-}}
+  # Use the domain-derived public URL, without the internal proxy target port.
+  APP_URL: ${SERVICE_URL_WEB:?Save an HTTPS domain for web in Coolify Access > Public access (internal port 3000)}
   DECIDIM_APPLICATION_NAME: ${DECIDIM_APPLICATION_NAME:-Community participation}
   DECIDIM_MAILER_SENDER: ${DECIDIM_MAILER_SENDER:-}
   SMTP_ADDRESS: ${SMTP_ADDRESS:-}
@@ -39,7 +40,7 @@ services:
     environment:
       <<: *app-environment
       SERVICE_URL_WEB_3000: /
-      SYSTEM_ADMIN_EMAIL: ${SYSTEM_ADMIN_EMAIL:-}
+      SYSTEM_ADMIN_EMAIL: ${SYSTEM_ADMIN_EMAIL:?Set SYSTEM_ADMIN_EMAIL in Coolify Environment Variables to the initial administrator email address}
       INITIAL_SYSTEM_ADMIN_PASSWORD: ${SERVICE_PASSWORD_64_ADMIN:?Coolify must generate the initial administrator password}
     expose:
       - "3000"

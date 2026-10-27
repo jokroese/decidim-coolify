@@ -15,6 +15,7 @@ class ComposeSetupTests(unittest.TestCase):
     def resolve(self, changes):
         values = validation.environment_fixture()
         values.update(changes)
+        values = {key: value for key, value in values.items() if value is not None}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fixture.env"
             validation.write_fixture(path, values)
@@ -28,14 +29,25 @@ class ComposeSetupTests(unittest.TestCase):
             self.assertEqual(services[role]["environment"]["SMTP_ADDRESS"], "")
             self.assertEqual(services[role]["environment"]["APP_URL"], "https://example.invalid")
 
-    def test_runtime_settings_do_not_block_build_interpolation(self):
-        services = self.resolve({"APP_URL": "", "SERVICE_URL_WEB_3000": "", "SYSTEM_ADMIN_EMAIL": ""})
-        self.assertEqual(services["web"]["environment"]["APP_URL"], "")
+    def test_missing_domain_fails_before_container_startup(self):
+        for value in ("", None):
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "Save an HTTPS domain for web"):
+                self.resolve({"SERVICE_URL_WEB": value})
 
-    def test_explicit_url_can_recover_missing_generated_url(self):
-        services = self.resolve({"APP_URL": "https://custom.example.invalid", "SERVICE_URL_WEB_3000": ""})
-        for role in ("web", "worker", "scheduler"):
-            self.assertEqual(services[role]["environment"]["APP_URL"], "https://custom.example.invalid")
+    def test_missing_administrator_email_fails_before_container_startup(self):
+        for value in ("", None):
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "Set SYSTEM_ADMIN_EMAIL in Coolify Environment Variables"):
+                self.resolve({"SYSTEM_ADMIN_EMAIL": value})
+
+    def test_domain_changes_reach_all_roles_despite_old_saved_values(self):
+        for domain in ("https://first.example.invalid", "https://renamed.example.invalid"):
+            services = self.resolve({
+                "SERVICE_URL_WEB": domain,
+                "SERVICE_URL_WEB_3000": "https://generated.example.invalid:3000",
+                "APP_URL": "https://stale.example.invalid:3000",
+            })
+            for role in ("web", "worker", "scheduler"):
+                self.assertEqual(services[role]["environment"]["APP_URL"], domain)
 
     def test_app_roles_pull_the_same_git_owned_image(self):
         services = self.resolve({})
