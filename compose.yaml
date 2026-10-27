@@ -1,0 +1,157 @@
+# Git-backed Coolify Application; deploy manually from a reviewed Git revision.
+# Replace this unpublished marker with the verified GHCR image digest after CI
+# publishes it, then commit the change. All app roles use this one reference.
+# registry.invalid deliberately cannot serve an image. See README.md.
+x-app-image: &app-image registry.invalid/decidim-coolify:unpublished
+
+x-app-environment: &app-environment
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: "true"
+  RAILS_SERVE_STATIC_FILES: "true"
+  RAILS_LOG_LEVEL: ${RAILS_LOG_LEVEL:-info}
+  RAILS_MAX_THREADS: "5"
+  SIDEKIQ_CONCURRENCY: "5"
+  TZ: UTC
+  SECRET_KEY_BASE: ${SERVICE_PASSWORD_64_RAILS:?Coolify must generate SERVICE_PASSWORD_64_RAILS}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${SERVICE_PASSWORD_64_ENCRYPTIONPRIMARY:?Coolify must generate the Active Record primary key}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${SERVICE_PASSWORD_64_ENCRYPTIONDETERMINISTIC:?Coolify must generate the Active Record deterministic key}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${SERVICE_PASSWORD_64_ENCRYPTIONSALT:?Coolify must generate the Active Record key derivation salt}
+  DATABASE_URL: postgres://${SERVICE_USER_DATABASE:?Coolify must generate the database user}:${SERVICE_PASSWORD_64_DATABASE:?Coolify must generate the database password}@database:5432/decidim
+  REDIS_URL: redis://:${SERVICE_PASSWORD_64_REDIS:?Coolify must generate the Redis password}@redis:6379/0
+  QUEUE_ADAPTER: sidekiq
+  APP_URL: ${SERVICE_URL_WEB_3000:?Set the public web URL in Coolify}
+  DECIDIM_APPLICATION_NAME: ${DECIDIM_APPLICATION_NAME:-Community participation}
+  DECIDIM_MAILER_SENDER: ${DECIDIM_MAILER_SENDER:?Set the sender address}
+  SMTP_ADDRESS: ${SMTP_ADDRESS:?Set the SMTP hostname}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_DOMAIN: ${SMTP_DOMAIN:?Set the SMTP domain}
+  SMTP_USERNAME: ${SMTP_USERNAME:?Set the SMTP username}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:?Set the SMTP password}
+  SMTP_AUTHENTICATION: ${SMTP_AUTHENTICATION:-plain}
+  SMTP_TLS: ${SMTP_TLS:-false}
+
+services:
+  web:
+    image: *app-image
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    command: [web]
+    environment:
+      <<: *app-environment
+      SERVICE_URL_WEB_3000: /
+      SYSTEM_ADMIN_EMAIL: ${SYSTEM_ADMIN_EMAIL:?Set the initial system administrator email}
+      INITIAL_SYSTEM_ADMIN_PASSWORD: ${SERVICE_PASSWORD_64_ADMIN:?Coolify must generate the initial administrator password}
+    expose:
+      - "3000"
+    volumes:
+      - uploads:/app/storage
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, ruby, docker/healthcheck.rb, web]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 5
+    stop_grace_period: 60s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    image: *app-image
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    command: [worker]
+    environment: *app-environment
+    volumes:
+      - uploads:/app/storage
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, ruby, docker/healthcheck.rb, worker]
+      interval: 60s
+      timeout: 15s
+      start_period: 90s
+      retries: 3
+    stop_grace_period: 45s
+    logging: *logging
+
+  scheduler:
+    image: *app-image
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    command: [scheduler]
+    environment:
+      <<: *app-environment
+      ENABLE_INACTIVE_ACCOUNT_CLEANUP: ${ENABLE_INACTIVE_ACCOUNT_CLEANUP:-false}
+    volumes:
+      - uploads:/app/storage
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, ruby, docker/healthcheck.rb, scheduler]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 60s
+    logging: *logging
+
+  database:
+    image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: decidim
+      POSTGRES_USER: ${SERVICE_USER_DATABASE:?Coolify must generate the database user}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_DATABASE:?Coolify must generate the database password}
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    stop_grace_period: 60s
+    logging: *logging
+
+  redis:
+    image: redis:8-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${SERVICE_PASSWORD_64_REDIS:?Coolify must generate the Redis password}
+      REDISCLI_AUTH: ${SERVICE_PASSWORD_64_REDIS:?Coolify must generate the Redis password}
+    command:
+      - /bin/sh
+      - -ec
+      - 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass "$${REDIS_PASSWORD}"'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD-SHELL, 'test "$$(redis-cli ping)" = PONG']
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    stop_grace_period: 30s
+    logging: *logging
+
+volumes:
+  database-data:
+  redis-data:
+  uploads:
