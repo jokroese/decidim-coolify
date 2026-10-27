@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+cd /app
+role="${1:-web}"
+if [ "$#" -gt 0 ]; then shift; fi
+case "$role" in
+  web)
+    bundle exec ruby docker/prepare.rb
+    exec bundle exec puma -C config/puma.rb "$@"
+    ;;
+  worker) exec bundle exec sidekiq -C config/sidekiq.yml -t 30 "$@" ;;
+  scheduler)
+    touch /tmp/scheduler-heartbeat
+    exec supercronic docker/crontab
+    ;;
+  prepare) exec bundle exec ruby docker/prepare.rb ;;
+  rails) exec bundle exec rails "$@" ;;
+  *) exec "$role" "$@" ;;
+esac

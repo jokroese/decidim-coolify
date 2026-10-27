@@ -1,0 +1,12 @@
+# Set TZ=UTC on the scheduler container. Supercronic uses TZ when scheduling.
+# Run the daily maintenance batch at 00:10 UTC. Tasks run serially in maintenance.rb.
+10 0 * * * bundle exec ruby /app/docker/maintenance.rb daily
+
+# Send the weekly notification digest on Saturday at 00:40 UTC.
+40 0 * * 6 bundle exec ruby /app/docker/maintenance.rb weekly
+
+# Advance participatory-process steps every 15 minutes.
+*/15 * * * * bundle exec ruby /app/docker/maintenance.rb quarter_hour
+
+# Coolify/container heartbeat. The timestamp is also a simple liveness signal.
+* * * * * touch /tmp/scheduler-heartbeat
