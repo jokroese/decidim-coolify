@@ -1,0 +1,13 @@
+{
+  "name": "decidim-coolify",
+  "private": true,
+  "dependencies": {
+    "@decidim/browserslist-config": "0.32.1",
+    "@decidim/core": "0.32.1",
+    "@decidim/webpacker": "0.32.1"
+  },
+  "version": "0.1.0",
+  "browserslist": [
+    "extends @decidim/browserslist-config"
+  ]
+}
