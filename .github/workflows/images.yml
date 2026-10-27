@@ -126,7 +126,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.values }}
-          cache-from: type=gha,scope=publish
+          # Reuse the native builds that passed the test jobs, as well as any
+          # previous publication cache. Cache misses still rebuild normally.
+          cache-from: |
+            type=gha,scope=publish
+            type=gha,scope=smoke-amd64
+            type=gha,scope=smoke-arm64
           cache-to: type=gha,mode=max,scope=publish
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
