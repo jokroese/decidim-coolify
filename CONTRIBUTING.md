@@ -47,12 +47,15 @@ docker build --platform linux/amd64 -t decidim-coolify:test .
 docker run --rm --network none --entrypoint bundle \
   --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
   decidim-coolify:test exec ruby /tests/migration_completeness_test.rb
+docker run --rm --network none --entrypoint ruby \
+  --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+  decidim-coolify:test /tests/deployment_configuration_test.rb
 SMOKE_IMAGE=decidim-coolify:test SMOKE_PLATFORM=linux/amd64 python3 tests/smoke.py
 ```
 
 For a native ARM64 check, replace both `linux/amd64` values with `linux/arm64`. Emulation is slower. CI is configured to build and test both architectures on native runners.
 
-The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely named disposable project. It supplies its own test settings; no email account or Coolify installation is needed. Expect `PASS` output and exit status 0. It checks migrations, initial administrator creation, health, compiled assets, API documentation, scheduled tasks, a worker job and upload persistence across restarts.
+The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely named disposable project. It supplies its own test settings; no email account or Coolify installation is needed. Expect `PASS` output and exit status 0. It checks migrations, initial administrator creation, health, compiled assets, API documentation, scheduled tasks, a worker job and upload persistence across restarts. It starts without SMTP, verifies the setup notice and explicit delivery failure, then adds SMTP and checks that delivery settings and the notice change.
 
 Read the failure output to identify the failed check and service logs. Fix the source, rebuild the image and rerun the relevant checks. The smoke test removes its own project and volumes on exit; if Docker becomes unavailable, confirm cleanup once it recovers. Never remove another project's volumes.
 
@@ -116,13 +119,13 @@ Use a development checkout with the target release's Ruby and Node versions, Bun
 
 ## Publishing a release
 
-For maintainers with repository and registry publishing access. Publishing an image does not deploy it.
+For maintainers with repository and registry publishing access. Publish and pin each release once; collectives then pull the same prebuilt image. They do not run these steps. Publishing an image does not deploy it.
 
 1. Make the repository available on GitHub. The workflow derives its GHCR image name from the repository owner and name.
-2. Push a reviewed `v*` release tag. Wait for both architecture test jobs and the publication job to succeed. The workflow publishes version and commit SHA tags, an SBOM and provenance.
+2. Once this workflow is on the default branch, run **Container image → Run workflow** on the reviewed source revision, or push a reviewed `v*` release tag. Wait for both architecture test jobs and the publication job to succeed. The workflow publishes a commit SHA tag, an SBOM and provenance; version-tag runs also publish the version tag. Pushes to `main` only build and test. The `.dockerbuild` artefacts are diagnostic build records, not pullable images.
 3. Make the package public so collectives can pull it without registry credentials. For a private pilot, configure registry access in Coolify instead.
 4. Copy the complete `ghcr.io/OWNER/REPOSITORY@sha256:…` reference from the workflow summary. Set `SMOKE_IMAGE` to that actual reference and run `tests/smoke.py` for each supported architecture, setting `SMOKE_PLATFORM` accordingly. The example ellipsis is not a usable digest.
-5. Replace `x-app-image` in `compose.yaml` with the tested reference. Run `python3 validate.py` without the development exception, then commit and review the deployment configuration. This commit does not need another image-release tag. Compose-only changes can retain the existing image digest.
+5. Download the `deployment-compose` artefact from the publication run. It contains the matching Compose file with `x-app-image` already pinned to the published digest. Review it against the source revision and use it as `compose.yaml` in the deployment branch. Run `python3 validate.py` without the development exception, then commit and review the deployment configuration. This commit does not need another image-release tag. Compose-only changes can retain the existing image digest.
 6. Give the technical helper the repository URL, deployment branch, exact deployment commit and release notes. Include required settings or migration actions. They follow the [manual deployment procedure](docs/OPERATIONS.md#deploying-a-reviewed-upgrade).
 
 For the first release, complete the readiness work above before removing the README's status notice. Keep the [verification record](VERIFICATION.md) current, with revision/image, architecture, commands, results and remaining limits.

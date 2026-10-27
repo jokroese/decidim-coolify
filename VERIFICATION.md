@@ -6,9 +6,9 @@ For developers preparing releases and technical helpers assessing deployment rea
 
 | Area | Recorded result |
 | --- | --- |
-| Latest Linux amd64 image | Local build and full smoke test passed, including generated API documentation. |
-| Latest Linux ARM64 image | Not retested locally after the cleanup; both architectures are configured in release CI. |
-| Published release | No remote CI run or image publication recorded; Compose still has an unusable image marker. |
+| Latest Linux amd64 image | Local build and full smoke test passed for optional-email first-run setup, including adding SMTP and restarting with persisted data. |
+| Latest Linux ARM64 image | CI passed for `a51c8a7`; the new first-run changes still need remote ARM64 checks. |
+| Published release | CI passed for both architectures at `a51c8a7`; publication was skipped. Compose still has the unpublished marker pending the first release. |
 | Coolify deployment | Not verified on a target instance. |
 | Real email and organisation onboarding | Not verified on a deployed site. |
 | Backups and recovery | No verified automated backup schedule or isolated recovery rehearsal. |
@@ -18,6 +18,26 @@ For developers preparing releases and technical helpers assessing deployment rea
 Follow [Help make setup ready](CONTRIBUTING.md#help-make-setup-ready). Record the tested source revision, image digest, architecture and Coolify version with each new result. A passing local smoke test does not establish working public HTTPS, real email delivery or recovery.
 
 ## Recorded evidence
+
+### Simpler first-run setup — 27 October 2026
+
+The default deployment still pulls one digest-pinned GHCR image for all three app roles. No source build was added to the deployment definition. The first release remains unpublished; these changes have not been deployed to Coolify.
+
+- `docker build --platform linux/amd64 -t decidim-coolify:first-run-test .` passed, including upstream migration checks, API documentation and asset compilation. Docker reported image identifier `sha256:a2ff42fbb99665a8c1896aba3409e62df0e8e4da1f54e4d8ee16c8a955aef2de`.
+- Compose validation with the development marker exception and all 10 Python configuration/release tests passed.
+- Ruby configuration tests passed: 9 tests, 38 assertions. Migration completeness tests passed: 9 tests, 26 assertions.
+- The actual startup check reported missing domain and administrator settings together before Rails or database access, with no stack trace.
+- `SMOKE_IMAGE=decidim-coolify:first-run-test SMOKE_PLATFORM=linux/amd64 python3 tests/smoke.py` passed. All five services became healthy without SMTP; the system sign-in page displayed the setup notice and attempted email delivery raised an explicit error.
+- Adding SMTP settings and recreating the app roles enabled verified STARTTLS, applied the sender/greeting-domain defaults and removed the setup notice. No real SMTP connection or delivery was attempted.
+- The same run verified migrations, bootstrap, compiled assets, scheduled execution, encrypted upload persistence after restarts, Sidekiq processing and generated API documentation. The disposable project `decidim-smoke-2fbc09016e` was removed with its volumes.
+- A preliminary smoke run failed because its test called a nonexistent mailer class method; the test was corrected and the complete stack rerun successfully.
+- Changed Markdown links and whitespace checks passed. A separate code review found no blocking issues. ARM64 coverage for these new changes will run in CI before publication.
+
+
+### Remote image checks — 27 October 2026
+
+[GitHub Actions run 40587635392](https://github.com/jokroese/decidim-coolify/actions/runs/40587635392) passed native amd64 and ARM64 builds, migration tests and smoke tests for commit `a51c8a7d76876221f8dcf4d20b8996b2bc7e0cb8`. The publication job was skipped because this was a push to `main`, not a version-tag release. The `.dockerbuild` artefacts contain build diagnostics, not deployable images.
+
 
 ### Generated documentation and source boundaries — 27 October 2026
 
@@ -59,4 +79,4 @@ The earlier cleanup retained all 199 generated API documentation files; the subs
 
 ### Earlier architecture evidence
 
-The earlier application passed local ARM64 build and smoke checks on 26 October. That result does not cover the subsequent cleanup or documentation-generation change. Release CI is configured to repeat the checks for both architectures, but has not run remotely.
+The earlier application passed local ARM64 build and smoke checks on 26 October. That result does not cover the subsequent cleanup or documentation-generation change. The later remote run for `a51c8a7` recorded above now covers both architectures.

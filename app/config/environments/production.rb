@@ -1,5 +1,5 @@
 require "active_support/core_ext/integer/time"
-require "uri"
+require_relative "../../lib/deployment_configuration"
 
 Rails.application.configure do
   config.enable_reloading = false
@@ -11,8 +11,9 @@ Rails.application.configure do
   config.active_storage.service = :local
 
   # Coolify terminates HTTPS; the application port stays private.
-  public_url = URI.parse(ENV.fetch("APP_URL"))
-  raise "APP_URL must be an HTTPS origin" unless public_url.scheme == "https" && public_url.host && ["", "/"].include?(public_url.path)
+  setup = DeploymentConfiguration.read
+  config.x.deployment = setup
+  public_url = setup[:public_url]
   config.assume_ssl = true
   config.force_ssl = true
   config.hosts = [public_url.host]
@@ -28,14 +29,14 @@ Rails.application.configure do
   config.active_job.queue_adapter = :sidekiq
 
   implicit_tls = ActiveModel::Type::Boolean.new.cast(ENV.fetch("SMTP_TLS", "false"))
-  config.action_mailer.delivery_method = :smtp
+  config.action_mailer.delivery_method = setup[:mail_enabled] ? :smtp : :setup_required
   config.action_mailer.raise_delivery_errors = true
   config.action_mailer.smtp_settings = {
     address: ENV.fetch("SMTP_ADDRESS", "localhost"),
-    port: Integer(ENV.fetch("SMTP_PORT", "587")),
+    port: setup[:smtp_port],
     authentication: ENV.fetch("SMTP_AUTHENTICATION", "plain"),
     user_name: ENV["SMTP_USERNAME"], password: ENV["SMTP_PASSWORD"],
-    domain: ENV["SMTP_DOMAIN"],
+    domain: setup[:smtp_domain],
     ssl: implicit_tls,
     enable_starttls: !implicit_tls,
     enable_starttls_auto: !implicit_tls,

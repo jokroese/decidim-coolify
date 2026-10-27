@@ -4,6 +4,9 @@ cd /app
 role="${1:-web}"
 if [ "$#" -gt 0 ]; then shift; fi
 case "$role" in
+  web|worker|scheduler|prepare) ruby docker/check_configuration.rb "$role" ;;
+esac
+case "$role" in
   web)
     bundle exec ruby docker/prepare.rb
     exec bundle exec puma -C config/puma.rb "$@"

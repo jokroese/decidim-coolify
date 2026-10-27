@@ -49,6 +49,7 @@ def environment_fixture() -> dict[str, str]:
         "DECIDIM_MAILER_SENDER": "test@example.invalid",
         "SERVICE_USER_DATABASE": "fixtureuser",
         "SERVICE_URL_WEB_3000": "https://example.invalid",
+        "APP_URL": "",
         "SERVICE_FQDN_WEB_3000": "example.invalid",
         "SMTP_ADDRESS": "smtp.example.invalid",
         "SMTP_DOMAIN": "example.invalid",

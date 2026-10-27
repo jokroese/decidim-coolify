@@ -1,9 +1,14 @@
 """Check that production image selection cannot drift into dashboard settings."""
 import importlib.util
 from pathlib import Path
+import re
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from pin_release import pin
+
 spec = importlib.util.spec_from_file_location("deployment_validation", ROOT / "validate.py")
 validation = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validation)
@@ -24,6 +29,26 @@ class ReleaseImageTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             validation.validate_image_reference(validation.UNPUBLISHED_IMAGE)
         validation.validate_image_reference(validation.UNPUBLISHED_IMAGE, allow_unpublished=True)
+
+
+class ReleasePinTests(unittest.TestCase):
+    def test_pinning_changes_only_the_image_anchor(self):
+        source = (ROOT / "compose.yaml").read_text()
+        image = "ghcr.io/example/decidim@sha256:" + "b" * 64
+        result = pin(source, image)
+        self.assertIn("x-app-image: &app-image " + image, result)
+        old_image = re.search(r"^x-app-image: &app-image (\S+)$", source, re.MULTILINE).group(1)
+        self.assertEqual(result.replace(image, old_image), source)
+
+    def test_missing_or_duplicate_anchor_is_rejected(self):
+        image = "ghcr.io/example/decidim@sha256:" + "b" * 64
+        for source in ("services: {}", "x-app-image: &app-image old\nx-app-image: &app-image duplicate"):
+            with self.assertRaises(RuntimeError):
+                pin(source, image)
+
+    def test_mutable_tag_cannot_be_pinned(self):
+        with self.assertRaises(RuntimeError):
+            pin("x-app-image: &app-image old", "ghcr.io/example/decidim:latest")
 
 
 if __name__ == "__main__":
