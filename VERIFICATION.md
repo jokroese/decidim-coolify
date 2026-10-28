@@ -19,6 +19,36 @@ Follow [Help make setup ready](CONTRIBUTING.md#help-make-setup-ready). Record th
 
 ## Recorded evidence
 
+### Setup flow and concise copy — 28 October 2026
+
+The same task branch was renamed to `simplify-setup-flow`; its existing worktree remains `organisation-setup-usability`. Changes were uncommitted at verification time, and the branch had no upstream. Nothing was published, deployed to Coolify or submitted upstream.
+
+- Built `decidim-coolify:setup-flow-test` for Linux amd64 under emulation on Apple Silicon. Image ID: `sha256:dfef6eb2f5a067645c3ea69b5de01272b1ffbb620342e06af9282fdf86083b80`.
+- Full smoke tests passed in disposable project `decidim-smoke-a6df4d8974`, including real HTTP failed/successful sign-in, first-time and returning-administrator pages, organisation creation before/after SMTP configuration, invitation recovery, CSRF rejection, persistence, workers and API documentation. The project and its volumes were removed.
+- The HTTP sign-in check uses the page meta CSRF token, matching Rails UJS’s refresh of hidden inputs. The initial in-process failure check used a form token that did not reproduce the browser request; replacing that harness with real HTTP retained authentication and CSRF checks without application workarounds.
+- JavaScript tests passed for word-initial prefixes, two-word and single-word names, accents, punctuation, non-Latin text and short-name limits. Prefix suggestions have no artificial 12-character limit. Compose validation, 13 Python tests, 9 migration tests (26 assertions) and 10 deployment-configuration tests (59 assertions) passed during this change.
+- Browser checks verified `Riverbank Gardeners` → `RG`, `Riverside Community Garden` → `RCG`, and preservation of manually edited prefixes. The interface uses a fictional example. Personal examples were removed before any commit.
+- A final copy-only edit removed redundant hints and email guidance before sign-in, and shortened the remaining help following the [documented writing approach](docs/ORGANISATION-SETUP.md#interface-writing-approach). This edit followed the image build/full smoke run. Its final views and translations were mounted into a separate disposable preview using that image; the real HTTP sign-in and Rails organisation-setup checks passed again. Both final pages were inspected in the browser. The final translation YAML parses and `git diff --check` passes.
+
+The final copy still needs to be included in the next image build for publication. The earlier limits on ARM64 verification, real email receipt, assistive technology and a browser run without JavaScript remain. No production credentials or accounts were changed.
+
+### Organisation setup usability — 28 October 2026
+
+Source: the `organisation-setup-usability` worktree based on `9ed0324`, with uncommitted changes at verification time. No image publication, upstream submission or live deployment was performed. The source changes require a new release before the pinned production image provides the revised form.
+
+- `docker build --platform linux/amd64 -t decidim-coolify:organisation-setup-test .` passed, including migration checks, API documentation and compilation of the setup pack. Image identifier: `sha256:503be747491276e54f0e1175d1e8d4cf3934c71d5af9ff7369e48b97e107b13b`.
+- `node --test tests/organisation_setup_test.mjs`: 3 tests passed, covering abbreviation examples, accents, non-Latin input, empty input and character limits.
+- Compose validation and all 13 Python tests passed. The new contract test verifies that every app role receives the same 128-character secret fixture from `SERVICE_HEX_128_RAILS`.
+- Migration tests: 9 tests, 26 assertions passed. Deployment configuration tests: 10 tests, 59 assertions passed, including rejection of incompatible supplied secret lengths.
+- Full amd64 smoke test passed under emulation on Apple Silicon. It includes real authenticated Rails requests before and after SMTP configuration: invalid input, escaped submitted HTML, manual values preserved after failure, default language enabled without JavaScript, unchanged access defaults, deferred invitations, later sending, normal mail enqueueing and resend, anonymous access refusal and CSRF rejection. Test mail used a recording queue adapter; no real email was sent.
+- The same smoke run verified all five services, migrations, compiled assets, restart persistence, an encrypted upload, Sidekiq processing and generated API documentation. Disposable project `decidim-smoke-b087fb961b` was removed with its volumes.
+- Browser checks on a separate disposable installation verified automatic suggestions, independent manual overrides, language filtering, default-language enabling, required-field messages and the native advanced disclosure. The layout was inspected at a narrow viewport. Browser data used synthetic names and addresses. That stack, `decidim-setup-check-fabbcd29`, and its volumes were removed afterwards.
+- Initial test failures exposed an asset-helper integration mistake and an incomplete synthetic form submission; both were corrected. The creation request also exposed the pilot's 64-character generated secret conflicting with Decidim's unchanged 128-character validation. The generator and fixtures now fit Decidim; there is no validation override or automatic secret rotation. Follow the [existing-installation upgrade check](docs/CONFIGURATION.md#upgrading-the-rails-secret-from-the-first-pilot).
+- Local documentation link targets and `git diff --check` passed. The [upstream plan](docs/ORGANISATION-SETUP.md) records behaviour, rationale, audience classification, proposed change sets, translations and removal of local overrides after an upstream release.
+
+Remaining limits: ARM64 verification for this change, target Coolify generator behaviour, real invitation receipt/acceptance, an actual browser run with JavaScript disabled, and assistive-technology testing remain unverified. New copy is English with fallback for other locales. No general migration for an existing short secret and encrypted settings is provided; those installations need a deliberate migration before adopting the new generator.
+
+
 ### Domain source and required settings — 28 October 2026
 
 The first target deployment demonstrated that a passing Docker smoke test did not establish a usable Coolify setup. Its deployment log hid web's configuration error behind an unhealthy dependency. The user had saved the intended domain, but the separate `APP_URL` setting still displayed Coolify's generated hostname with internal port 3000; the runtime error also reported a missing administrator email. The displayed URL alone would pass the existing syntax validator, so the exact failed container's URL remains unconfirmed.

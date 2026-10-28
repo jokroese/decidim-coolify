@@ -2,6 +2,8 @@
 
 For developers maintaining the application image. See [Contributing](CONTRIBUTING.md) for the build and release workflow.
 
+For the organisation creation form, see the separate [usability contribution plan](docs/ORGANISATION-SETUP.md). Those changes target `decidim/decidim`, rather than the Docker packaging repository.
+
 ## Decision
 
 Use a custom, repository-built Decidim 0.32.1 image for this Coolify deployment. The application image available in the investigation was 0.31.6, and the 0.32.1 generator did not produce a complete production runtime without changes. Keeping the image here allows deployment work to proceed while upstream improvements are reviewed independently.
