@@ -108,11 +108,19 @@ def main() -> int:
                 raise RuntimeError(redact(result.stdout[-12000:], values))
             return result
 
-        def runner(code: str, *, service: str = "web", check: bool = True) -> str:
+        def runner(code: str) -> str:
             result = run([
-                "exec", "-T", service, "/app/docker/entrypoint", "rails", "runner", code,
-            ], timeout=120, check=check)
+                "exec", "-T", "web", "/app/docker/entrypoint", "rails", "runner", code,
+            ], timeout=120)
             return result.stdout.strip()
+
+        checkpoint = time.monotonic()
+
+        def report(message: str) -> None:
+            nonlocal checkpoint
+            now = time.monotonic()
+            print(f"PASS: {message} ({now - checkpoint:.1f}s)", flush=True)
+            checkpoint = now
 
         started = False
         try:
@@ -136,14 +144,14 @@ def main() -> int:
             run(["pull", "database", "redis"], timeout=UP_TIMEOUT)
             started = True
             run(["up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", str(UP_TIMEOUT)], timeout=UP_TIMEOUT + 60)
-            print(f"PASS: all five services became healthy in disposable project {project}")
+            report(f"all five services became healthy in disposable project {project}")
 
             for role in ("web", "worker", "scheduler"):
                 uid = run(["exec", "-T", role, "id", "-u"]).stdout.strip()
                 if uid != "1000":
                     raise RuntimeError(f"Expected {role} UID 1000, got {uid!r}")
                 run(["exec", "-T", role, "ruby", "docker/healthcheck.rb", role], timeout=30)
-            print("PASS: app roles run as UID 1000 and their health commands pass")
+            report("app roles run as UID 1000 and their health commands pass")
 
             task_check = r'''require "rake"; Rails.application.load_tasks
 required = %w[db:migrate data:migrate]
@@ -161,9 +169,6 @@ scheduled.each do |group|
   raise "Missing rake tasks for #{group}: #{missing.join(", ")}" unless missing.empty?
 end
 puts "SMOKE_TASKS_OK"'''
-            if "SMOKE_TASKS_OK" not in runner(task_check):
-                raise RuntimeError("Rails did not confirm migration and scheduled maintenance tasks")
-
             route_check = r'''require "net/http"; require "uri"
 public_uri = URI(ENV.fetch("APP_URL"))
 http = Net::HTTP.new("127.0.0.1", 3000, nil)
@@ -194,10 +199,6 @@ asset = request.call(asset_path)
 abort "Compiled asset returned #{asset.code}" unless asset.code == "200"
 abort "Compiled asset body is empty" if asset.body.to_s.empty?
 puts "SMOKE_SIGNIN_HTML_AND_ASSET_OK"'''
-            if "SMOKE_SIGNIN_HTML_AND_ASSET_OK" not in runner(route_check):
-                raise RuntimeError("The internal system sign-in page or its compiled asset failed")
-            print("PASS: migration/data tasks, scheduled rake tasks, sign-in HTML and compiled asset are present")
-            run(["exec", "-T", "scheduler", "bundle", "exec", "ruby", "docker/maintenance.rb", "quarter_hour"], timeout=120)
             mail_disabled = r'''raise "Email should be pending" unless Rails.application.config.action_mailer.delivery_method == :setup_required
 class SetupSmokeMailer < ActionMailer::Base
   def probe
@@ -210,72 +211,64 @@ begin
 rescue DeploymentConfiguration::EmailNotConfigured
   puts "SMOKE_EMAIL_PENDING_OK"
 end'''
-            if "SMOKE_EMAIL_PENDING_OK" not in runner(mail_disabled):
-                raise RuntimeError("Unconfigured mail did not fail explicitly")
-            print("PASS: startup without SMTP permits sign-in and refuses delivery explicitly")
+            initial_checks = runner("\n".join((task_check, route_check, mail_disabled)))
+            for marker in ("SMOKE_TASKS_OK", "SMOKE_SIGNIN_HTML_AND_ASSET_OK", "SMOKE_EMAIL_PENDING_OK"):
+                if marker not in initial_checks:
+                    raise RuntimeError(f"Initial application checks did not confirm {marker}")
+            report("migration/data tasks, sign-in assets and unconfigured email checks passed")
+            run(["exec", "-T", "scheduler", "bundle", "exec", "ruby", "docker/maintenance.rb", "quarter_hour"], timeout=120)
+            report("scheduled maintenance tasks ran successfully")
 
             sign_in_check = (ROOT / "tests" / "system_sign_in_check.rb").read_text()
             if "SMOKE_SYSTEM_SIGN_IN_OK" not in run(["exec", "-T", "web", "bundle", "exec", "ruby", "-e", sign_in_check]).stdout:
                 raise RuntimeError("System sign-in HTTP checks did not complete")
-            print("PASS: failed sign-in shows its error and valid credentials reach organisation setup")
+            report("failed sign-in shows its error and valid credentials reach organisation setup")
 
             setup_check = (ROOT / "tests" / "organisation_setup_check.rb").read_text()
             if "SMOKE_ORGANISATION_SETUP_OK" not in runner(setup_check):
                 raise RuntimeError("Organisation setup without email failed")
-            print("PASS: organisation form, validation, access controls and deferred invitation")
+            report("organisation form, validation, access controls and deferred invitation")
 
             # Complete email setup without replacing volumes or bootstrap secrets.
             values.update({"SMTP_ADDRESS": "smtp.example.invalid", "SMTP_USERNAME": "smoke-user",
                            "SMTP_PASSWORD": "disposable-smtp-password"})
             env_file.write_text("".join(f"{key}={value}\n" for key, value in values.items()))
             run(["up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", str(UP_TIMEOUT)], timeout=UP_TIMEOUT + 60)
-            runner('settings = Rails.application.config.action_mailer.smtp_settings; raise "SMTP TLS verification disabled" unless settings[:openssl_verify_mode] == "peer" && settings[:enable_starttls] == true; raise "SMTP not enabled" unless Rails.application.config.action_mailer.delivery_method == :smtp; raise "SMTP domain default missing" unless settings[:domain] == "smoke.example.invalid"; raise "Sender default missing" unless Decidim.mailer_sender == "no-reply@smoke.example.invalid"')
-            if "SMOKE_SIGNIN_HTML_AND_ASSET_OK" not in runner(route_check):
+            smtp_check = 'settings = Rails.application.config.action_mailer.smtp_settings; raise "SMTP TLS verification disabled" unless settings[:openssl_verify_mode] == "peer" && settings[:enable_starttls] == true; raise "SMTP not enabled" unless Rails.application.config.action_mailer.delivery_method == :smtp; raise "SMTP domain default missing" unless settings[:domain] == "smoke.example.invalid"; raise "Sender default missing" unless Decidim.mailer_sender == "no-reply@smoke.example.invalid"'
+            if "SMOKE_SIGNIN_HTML_AND_ASSET_OK" not in runner(smtp_check + "\n" + route_check):
                 raise RuntimeError("Sign-in page failed after email configuration")
-            print("PASS: adding SMTP enables verified TLS, applies domain defaults and preserves sign-in")
+            report("adding SMTP enables verified TLS, applies domain defaults and preserves sign-in")
 
             if "SMOKE_ORGANISATION_SETUP_OK" not in runner(setup_check):
                 raise RuntimeError("Organisation setup with configured email failed")
-            print("PASS: configured organisation invitations and resend enqueue normally")
+            report("configured organisation invitations and resend enqueue normally")
 
-            initial_state = r'''require "json"; count = Decidim::System::Admin.count; orgs = Decidim::Organization.count; raise "Expected exactly one system admin, got #{count}" unless count == 1; raise "Expected no sample organisations, got #{orgs}" unless orgs.zero?; puts "SMOKE_STATE=#{JSON.generate(admins: count, organisations: orgs)}"'''
-            state = runner(initial_state)
-            if '"admins":1' not in state or '"organisations":0' not in state:
-                raise RuntimeError("Unexpected initial bootstrap state: " + redact(state, values))
-            print("PASS: bootstrap created exactly one system administrator and no sample organisations")
-
+            initial_state = r'''count = Decidim::System::Admin.count; orgs = Decidim::Organization.count; raise "Expected exactly one system admin, got #{count}" unless count == 1; raise "Expected no sample organisations, got #{orgs}" unless orgs.zero?'''
             create_blob = r'''require "stringio"; payload = "decidim-coolify-smoke-#{Process.pid}-#{Time.now.to_i}"; encrypted = ActiveRecord::Encryption.encryptor.encrypt(payload); blob = ActiveStorage::Blob.create_and_upload!(io: StringIO.new(encrypted), filename: "decidim-coolify-smoke.txt", content_type: "text/plain", identify: false); blob.open { |file| raise "Upload read-back mismatch" unless ActiveRecord::Encryption.encryptor.decrypt(file.read) == payload }; puts "SMOKE_BLOB_ID=#{blob.id}"'''
-            blob_output = runner(create_blob)
+            blob_output = runner(initial_state + "\n" + create_blob)
             match = re.search(r"SMOKE_BLOB_ID=(\d+)", blob_output)
             if not match:
                 raise RuntimeError("Could not read the created ActiveStorage blob ID")
             blob_id = match.group(1)
+            report("bootstrap created one administrator, no sample organisations and a readable encrypted upload")
 
             run(["restart", "web", "worker", "scheduler"], timeout=120)
             run(["up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", str(UP_TIMEOUT)], timeout=UP_TIMEOUT + 60)
             verify_blob = f'''blob = ActiveStorage::Blob.find({blob_id}); blob.open {{ |file| raise "Persistent upload contents changed" unless ActiveRecord::Encryption.encryptor.decrypt(file.read).start_with?("decidim-coolify-smoke-") }}; puts "SMOKE_BLOB_PERSISTED"'''
-            if "SMOKE_BLOB_PERSISTED" not in runner(verify_blob):
+            if "SMOKE_BLOB_PERSISTED" not in runner(initial_state + "\n" + verify_blob):
                 raise RuntimeError("Upload did not survive app-role restarts")
-            state_after_restart = runner(initial_state)
-            if '"admins":1' not in state_after_restart or '"organisations":0' not in state_after_restart:
-                raise RuntimeError("Bootstrap state changed after app-role restart")
-            print("PASS: the encrypted upload and administrator state survived web, worker and scheduler restarts")
+            report("the encrypted upload and administrator state survived web, worker and scheduler restarts")
 
-            enqueue_purge = f'''ActiveStorage::PurgeJob.perform_later(ActiveStorage::Blob.find({blob_id})); puts "SMOKE_PURGE_ENQUEUED"'''
-            if "SMOKE_PURGE_ENQUEUED" not in runner(enqueue_purge):
-                raise RuntimeError("Could not enqueue the ActiveStorage purge job")
-            deadline = time.monotonic() + 90
-            while time.monotonic() < deadline:
-                result = runner(
-                    f'''puts(ActiveStorage::Blob.exists?({blob_id}) ? "SMOKE_BLOB_PRESENT" : "SMOKE_BLOB_PURGED")''',
-                    check=False,
-                )
-                if "SMOKE_BLOB_PURGED" in result:
-                    print("PASS: Sidekiq consumed the ActiveStorage purge job")
-                    break
-                time.sleep(3)
-            else:
-                raise RuntimeError("Sidekiq did not process the queued ActiveStorage purge job within 90 seconds")
+            purge_check = f'''ActiveStorage::PurgeJob.perform_later(ActiveStorage::Blob.find({blob_id}))
+deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 90
+while ActiveRecord::Base.uncached {{ ActiveStorage::Blob.exists?({blob_id}) }}
+  raise "Sidekiq did not process the queued ActiveStorage purge job within 90 seconds" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+  sleep 3
+end
+puts "SMOKE_BLOB_PURGED"'''
+            if "SMOKE_BLOB_PURGED" not in runner(purge_check):
+                raise RuntimeError("Sidekiq did not confirm the ActiveStorage purge job")
+            report("Sidekiq consumed the ActiveStorage purge job")
 
             # Only create a tenant after checking that bootstrap/restarts do not
             # seed organisations. The disposable project owns all test data.
@@ -307,7 +300,7 @@ end
 puts "SMOKE_API_DOCS_OK"'''
             if "SMOKE_API_DOCS_OK" not in runner(docs_check):
                 raise RuntimeError("Generated API documentation or its compiled asset failed")
-            print("PASS: generated API documentation, a schema page and their compiled assets are served")
+            report("generated API documentation, a schema page and their compiled assets are served")
             print("SMOKE TEST PASSED")
             return 0
         except KeyboardInterrupt:

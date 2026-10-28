@@ -17,7 +17,47 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Validate and detect changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      images: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || steps.filter.outputs.images == 'true' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Validate deployment contract
+        run: |
+          python3 validate.py --allow-unpublished-image
+          python3 -m unittest discover -s tests -p "test_*.py"
+
+      - name: Set up Node for setup suggestion tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test organisation name suggestions
+        run: node --test tests/organisation_setup_test.mjs
+
+      - name: Detect changes requiring container tests
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          base: ${{ github.ref }}
+          predicate-quantifier: every
+          # Only prose outside the application is exempt; unknown paths run CI.
+          filters: |
+            images:
+              - '!*.md'
+              - '!docs/**/*.md'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
     name: Build and smoke-test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -37,19 +77,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
-
-      - name: Validate deployment contract
-        run: |
-          python3 validate.py --allow-unpublished-image
-          python3 -m unittest discover -s tests -p "test_*.py"
-
-      - name: Set up Node for setup suggestion tests
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Test organisation name suggestions
-        run: node --test tests/organisation_setup_test.mjs
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -78,9 +105,28 @@ jobs:
             decidim-coolify:test /tests/deployment_configuration_test.rb
 
       - name: Smoke-test image
-        run: python3 tests/smoke.py
+        run: python3 -u tests/smoke.py
         env:
           SMOKE_IMAGE: decidim-coolify:test
+
+  ci:
+    name: CI
+    if: always()
+    needs: [changes, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check required results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          IMAGES_REQUIRED: ${{ needs.changes.outputs.images }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$IMAGES_REQUIRED" = true ]; then
+            test "$TEST_RESULT" = success
+          else
+            test "$TEST_RESULT" = skipped
+          fi
 
   publish:
     name: Publish versioned multi-architecture image

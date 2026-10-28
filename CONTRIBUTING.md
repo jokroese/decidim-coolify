@@ -54,9 +54,9 @@ docker run --rm --network none --entrypoint ruby \
 SMOKE_IMAGE=decidim-coolify:test SMOKE_PLATFORM=linux/amd64 python3 tests/smoke.py
 ```
 
-For a native ARM64 check, replace both `linux/amd64` values with `linux/arm64`. Emulation is slower. CI is configured to build and test both architectures on native runners.
+For a native ARM64 check, replace both `linux/amd64` values with `linux/arm64`. Emulation is slower. CI builds and tests both architectures on native runners. Changes limited to root Markdown files and Markdown under `docs/` run only the quick checks; all other changes, release tags and manual runs include container tests. Use the always-running `CI` check for branch protection: it fails if validation, change detection or required container tests fail.
 
-The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely named disposable project. It supplies its own test settings; no email account or Coolify installation is needed. Expect `PASS` output and exit status 0. It checks migrations, initial administrator creation, health, compiled assets, API documentation, scheduled tasks, a worker job and upload persistence across restarts. It starts without SMTP, verifies the setup notice and explicit delivery failure, then adds SMTP and checks that delivery settings and the notice change.
+The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely named disposable project. It supplies its own test settings; no email account or Coolify installation is needed. Expect `PASS` output with elapsed seconds since the previous checkpoint and exit status 0. It checks migrations, initial administrator creation, health, compiled assets, API documentation, scheduled tasks, a worker job and upload persistence across restarts. It starts without SMTP, verifies the setup notice and explicit delivery failure, then adds SMTP and checks that delivery settings and the notice change.
 
 Read the failure output to identify the failed check and service logs. Fix the source, rebuild the image and rerun the relevant checks. The smoke test removes its own project and volumes on exit; if Docker becomes unavailable, confirm cleanup once it recovers. Never remove another project's volumes.
 
