@@ -2,6 +2,12 @@
 
 Help collectives set up and maintain Decidim with less technical work. Keep the [setup guide](README.md) focused on their actions; put implementation details here or in the linked technical references.
 
+## Project boundaries
+
+This repository owns the maintained deployment, editable development environment, build tools and regression tests. [Decidim Lab](https://github.com/jokroese/decidim-lab) owns research, comparative benchmarks and experiments. The lab records the product commit or image under investigation and reuses `bin/dev` and `bin/check`; it does not maintain a second product development stack.
+
+When an experiment becomes maintained behaviour, keep its implementation and regression tests here. Keep the investigation and comparative results in the lab. Workshop facilitation materials remain in decidim-fest-2026.
+
 ## Help make setup ready
 
 Public images are available, but public routing, real email delivery and backup/recovery still need verification on a target Coolify installation. Passing local or CI tests does not establish deployment readiness. Before describing setup as self-service:
@@ -179,7 +185,8 @@ Checks run daily on weekdays; publication does not create a PR immediately. This
 
 - [Configuration](docs/CONFIGURATION.md): required values, defaults and generated credentials.
 - [Operations](docs/OPERATIONS.md): deployment, backups, recovery and maintenance checks.
-- [Organisation setup and upstream plan](docs/ORGANISATION-SETUP.md): behaviour, audience, tests and local override removal.
+- [Organisation setup contract](docs/ORGANISATION-SETUP.md): behaviour, tests and local override responsibilities.
+- [Setup research and upstream plan](https://github.com/jokroese/decidim-lab/blob/main/research/organisation-setup.md): evidence, proposed contributions and their status.
 - [Upstream decisions](UPSTREAM.md): why this project maintains an image and when to revisit it.
 - [Dependency audit](DEPENDENCY-AUDIT.md): dated findings and follow-up work.
 - [Decidim 0.32.1 release](https://github.com/decidim/decidim/releases/tag/v0.32.1) and [versioned installation guidance](https://github.com/decidim/decidim/blob/v0.32.1/docs/modules/install/pages/index.adoc).

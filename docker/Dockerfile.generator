@@ -1,3 +1,0 @@
-# Build-only correction for the official 0.32.1 generator: libvips is required.
-FROM ghcr.io/decidim/decidim-generator:0.32.1@sha256:c96f503469e44d2cb165dbc4847171b13d65ef5c91b599d119e53cd18fbe078c
-RUN apt-get update && apt-get install -y --no-install-recommends libvips-tools && rm -rf /var/lib/apt/lists/*
