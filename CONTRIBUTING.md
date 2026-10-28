@@ -22,10 +22,47 @@ The [verification record](VERIFICATION.md) distinguishes completed checks from u
 | Readiness, worker and scheduler checks | [healthcheck.rb](docker/healthcheck.rb) |
 | Recurring jobs | [crontab](docker/crontab), [maintenance.rb](docker/maintenance.rb) |
 | Rails configuration and dependency versions | [app/](app/) |
+| Editable development environment | [bin/dev](bin/dev), [compose.development.yaml](compose.development.yaml) |
 | Deployment validation and runtime checks | [validate.py](validate.py), [tests/](tests/) |
 | CI and image publication | [images.yml](.github/workflows/images.yml) |
 
-`app/` is the Rails application hosting Decidim. Decidim itself comes from locked upstream gems and frontend packages. Normal builds use the committed application; they do not regenerate it. Ruby and Node base images are pinned by digest. Node and compilation tools remain in the build stage.
+`app/` is the Rails application hosting Decidim. Decidim itself comes from locked upstream gems and frontend packages. Normal builds use the committed application; they do not regenerate it. Ruby and Node base images are pinned by digest. Node and compilation tools are excluded from the production runtime image; the development image includes them.
+
+## Local development
+
+Install Python 3, Git and Docker with Compose 2.32 or later. Start Docker before running these commands from the repository root. Ruby, Node and application dependencies run in containers; the first build needs network access and disk space. macOS with Docker Desktop and Linux Docker hosts are supported.
+
+```sh
+bin/dev up
+```
+
+This builds the development image, prepares isolated databases and starts Rails, PostgreSQL, Redis, Sidekiq and the asset watcher. It prints the local browser URL and synthetic administrator login. It does not run Decidim's application upgrade task or seed example organisations.
+
+Open the reported URL with `/system` to sign in. Create an organisation for hostname `localhost`. Development email is captured at `/letter_opener`; no real SMTP credentials are needed. The production-only email-pending behaviour is covered by the production image smoke tests, not by development email capture.
+
+Compose Watch synchronises source changes. Refresh the browser after editing a template or after the asset watcher recompiles JavaScript/CSS. Configuration changes restart affected processes; dependency manifest changes rebuild the development image. Installed dependencies remain inside the container. The scheduler is not part of the development stack.
+
+Each worktree has its own Compose project, database, uploads and generated credentials. The browser listens on loopback port 3000. Set `DEV_PORT=3001 bin/dev up` to run a second worktree on a different port. Development credentials live in the ignored `.local/dev/` directory and remain stable across restarts. Do not copy production settings into that directory.
+
+| Command | Result |
+| --- | --- |
+| `bin/dev up` | Prepare and start the editable environment, then watch source changes |
+| `bin/dev logs` | Follow this worktree's service logs |
+| `bin/dev logs web` | Follow one service's logs |
+| `bin/dev down` | Stop this worktree's environment and keep its data |
+| `bin/dev reset --yes` | Delete this worktree's development data and generated credentials |
+
+Reset is destructive only to this development project. Use it deliberately; a normal restart does not require resetting data. Never use production volumes for development.
+
+### Verify a browser change
+
+1. Sign in at `/system`, including an unsuccessful attempt before the successful one.
+2. Create an organisation, check validation messages and follow its administrator invitation from `/letter_opener`.
+3. Use the keyboard to reach and operate the changed controls. Repeat organisation creation with JavaScript disabled, using another disposable organisation.
+4. Edit a template and a JavaScript/CSS source file; confirm the changes appear after refresh without rebuilding the production image.
+5. Restart the stack and confirm the organisation and an uploaded logo remain. Record any unverified step in the contribution.
+
+If startup fails, read the named service's logs. An occupied browser port requires a different `DEV_PORT`; a Docker connection error requires starting Docker. Fix the failing source or configuration before retrying. `bin/dev --help` lists the supported commands. The generated application-level setup helpers are not a second supported development workflow.
 
 ## Build and check a change
 
@@ -60,7 +97,7 @@ The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely
 
 Read the failure output to identify the failed check and service logs. Fix the source, rebuild the image and rerun the relevant checks. The smoke test removes its own project and volumes on exit; if Docker becomes unavailable, confirm cleanup once it recovers. Never remove another project's volumes.
 
-This is the supported container test loop. It exposes no browser port and does not send real email or test Coolify routing. Use an isolated Coolify pilot for the [manual setup checks](README.md#set-up). A documented interactive development environment is still missing: `app/config/database.yml` configures production only, and `app/bin/dev` runs `decidim:upgrade` as well as migrations. Do not treat the generated Rails helpers as a ready-made local setup.
+The container smoke test exposes no browser port and does not send real email or test Coolify routing. Use the [local development environment](#local-development) for browser work and an isolated Coolify pilot for the [manual setup checks](README.md#set-up).
 
 For optional Ruby style and security checks, install the application bundle including development dependencies, then run `bin/ci` from `app/`. Those checks are separate from release CI.
 

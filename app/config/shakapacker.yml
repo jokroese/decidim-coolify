@@ -61,7 +61,7 @@ default: &default
 
 development:
   <<: *default
-  compile: true
+  compile: false
   compiler_strategy: mtime
   # Compile test packs to decidim decidim-packs folder
 

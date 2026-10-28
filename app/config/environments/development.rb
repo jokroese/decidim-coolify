@@ -33,16 +33,30 @@ Rails.application.configure do
   # Store uploaded files on the local file system (see config/storage.yml for options).
   config.active_storage.service = :local
 
-  # Don't care if the mailer can't send.
-  config.action_mailer.raise_delivery_errors = false
-  config.action_mailer.delivery_method = :letter_opener_web
-  config.action_mailer.default_url_options = { port: 3000 }
+  # Worktrees share localhost, so give each development port its own browser session.
+  dev_port = Integer(ENV.fetch("DEV_PORT", "3000"))
+  config.session_store :cookie_store, key: "_session_id_dev_#{dev_port}"
 
+  config.active_record.encryption.primary_key = ENV.fetch("ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY")
+  config.active_record.encryption.deterministic_key = ENV.fetch("ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY")
+  config.active_record.encryption.key_derivation_salt = ENV.fetch("ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT")
+
+  config.action_mailer.perform_deliveries = true
+  config.action_mailer.delivery_method = :letter_opener_web
   # Make template changes take effect immediately.
   config.action_mailer.perform_caching = false
 
   # Set localhost to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "localhost", port: 3000 }
+  config.action_mailer.default_url_options = { host: "localhost", port: dev_port, protocol: "http" }
+  config.action_mailer.raise_delivery_errors = true
+  config.hosts << "localhost"
+  config.hosts << "127.0.0.1"
+  config.hosts << "::1"
+  config.after_initialize do
+    Rails.application.routes.default_url_options = {
+      host: "localhost", port: dev_port, protocol: "http"
+    }
+  end
 
   # Print deprecation notices to the Rails logger.
   config.active_support.deprecation = :log

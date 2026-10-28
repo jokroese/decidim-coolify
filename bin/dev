@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""Run the isolated, editable Docker Compose development environment."""
+
+from __future__ import annotations
+
+import hashlib
+import fcntl
+import os
+from pathlib import Path
+import re
+import secrets
+import subprocess
+import sys
+
+
+ROOT = Path(__file__).resolve().parent.parent
+COMPOSE_FILE = ROOT / "compose.development.yaml"
+STATE_DIR = ROOT / ".local" / "dev"
+ENV_FILE = STATE_DIR / "env"
+LOCK_FILE = STATE_DIR / ".lock"
+MIN_COMPOSE = (2, 32, 0)
+
+
+def project_name() -> str:
+    canonical = str(ROOT.resolve())
+    slug = re.sub(r"[^a-z0-9_-]+", "-", ROOT.name.lower()).strip("-_") or "app"
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:10]
+    return f"{slug}-dev-{digest}"
+
+
+def docker_environment() -> dict[str, str]:
+    # Only Docker client configuration and the explicitly supported port override
+    # cross the boundary. Rails secrets and app settings come from our private file.
+    allowed = ("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+               "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "XDG_RUNTIME_DIR", "DEV_PORT")
+    return {key: os.environ[key] for key in allowed if key in os.environ}
+
+
+def read_state() -> dict[str, str]:
+    return dict(line.split("=", 1) for line in ENV_FILE.read_text(encoding="utf-8").splitlines() if "=" in line)
+
+
+def write_state(values: dict[str, str]) -> None:
+    temp_file = STATE_DIR / f".env.{os.getpid()}.{secrets.token_hex(6)}.tmp"
+    descriptor = os.open(temp_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as state:
+            state.write("".join(f"{key}={value}\n" for key, value in values.items()))
+            state.flush()
+            os.fsync(state.fileno())
+        os.replace(temp_file, ENV_FILE)
+    finally:
+        temp_file.unlink(missing_ok=True)
+
+
+def ensure_state() -> None:
+    if (ROOT / ".local").is_symlink() or STATE_DIR.is_symlink():
+        raise SystemExit(f"Refusing to use symlinked local state: {STATE_DIR}")
+    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        STATE_DIR.chmod(0o700)
+    except OSError as error:
+        raise SystemExit(f"Could not protect development state directory {STATE_DIR}: {error}") from error
+    if LOCK_FILE.is_symlink():
+        raise SystemExit(f"Refusing to use symlinked local state lock: {LOCK_FILE}")
+    lock_fd = os.open(LOCK_FILE, os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(lock_fd, 0o600)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        if ENV_FILE.exists():
+            if ENV_FILE.is_symlink() or not ENV_FILE.is_file():
+                raise SystemExit(f"Refusing to use unsafe state file: {ENV_FILE}")
+            try:
+                ENV_FILE.chmod(0o600)
+            except OSError as error:
+                raise SystemExit(f"Could not protect development credentials {ENV_FILE}: {error}") from error
+            values = read_state()
+            if values.get("COMPOSE_PROJECT_NAME") != project_name():
+                raise SystemExit(f"Development state does not match this worktree: {ENV_FILE}")
+        else:
+            values = {
+                "COMPOSE_PROJECT_NAME": project_name(),
+                "DEV_PORT": "3000",
+                "DB_PASSWORD": secrets.token_hex(32),
+                "REDIS_PASSWORD": secrets.token_hex(32),
+                # Rails requires a 128-character secret key base.
+                "SECRET_KEY_BASE": secrets.token_hex(64),
+                "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY": secrets.token_hex(32),
+                "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY": secrets.token_hex(32),
+                "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT": secrets.token_hex(32),
+                "SYSTEM_ADMIN_EMAIL": "admin@example.test",
+                "SYSTEM_ADMIN_PASSWORD": secrets.token_urlsafe(32),
+            }
+        if "DEV_PORT" in os.environ:
+            values["DEV_PORT"] = os.environ["DEV_PORT"]
+        port = values.get("DEV_PORT", "3000")
+        if not port.isdecimal() or not 1 <= int(port) <= 65535:
+            raise SystemExit("DEV_PORT must be an integer from 1 to 65535")
+        write_state(values)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def protect_existing_state() -> None:
+    if (ROOT / ".local").is_symlink() or STATE_DIR.is_symlink():
+        raise SystemExit(f"Refusing to use symlinked local state: {STATE_DIR}")
+    if not STATE_DIR.exists():
+        return
+    try:
+        STATE_DIR.chmod(0o700)
+    except OSError as error:
+        raise SystemExit(f"Could not protect development state directory {STATE_DIR}: {error}") from error
+    if not ENV_FILE.exists():
+        return
+    if ENV_FILE.is_symlink() or not ENV_FILE.is_file():
+        raise SystemExit(f"Refusing to use unsafe state file: {ENV_FILE}")
+    try:
+        ENV_FILE.chmod(0o600)
+    except OSError as error:
+        raise SystemExit(f"Could not protect development credentials {ENV_FILE}: {error}") from error
+
+
+def validate_port() -> None:
+    port = os.environ.get("DEV_PORT")
+    if port is None and ENV_FILE.is_file() and not ENV_FILE.is_symlink():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            if line.startswith("DEV_PORT="):
+                port = line.partition("=")[2]
+                break
+    port = port or "3000"
+    if not port.isdecimal() or not 1 <= int(port) <= 65535:
+        raise SystemExit("DEV_PORT must be an integer from 1 to 65535")
+
+
+def compose_args(*args: str) -> list[str]:
+    env_file = str(ENV_FILE) if ENV_FILE.is_file() else os.devnull
+    return ["docker", "compose", "--project-name", project_name(), "--env-file", env_file,
+            "--file", str(COMPOSE_FILE), *args]
+
+
+def run(args: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    environment = docker_environment()
+    if not ENV_FILE.is_file():
+        # Stop/reset/log operations can still target this path's project if its
+        # private state file was removed. These throwaway values are never saved.
+        environment.update({
+            "COMPOSE_PROJECT_NAME": project_name(),
+            "DB_PASSWORD": "unused-local-state",
+            "REDIS_PASSWORD": "unused-local-state",
+            "SECRET_KEY_BASE": "0" * 128,
+            "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY": "0" * 64,
+            "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY": "0" * 64,
+            "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT": "0" * 64,
+            "SYSTEM_ADMIN_EMAIL": "unused@example.test",
+            "SYSTEM_ADMIN_PASSWORD": "unused-local-state",
+        })
+    return subprocess.run(args, cwd=ROOT, env=environment, text=True,
+                          check=check, capture_output=capture)
+
+
+def check_compose_version() -> None:
+    try:
+        result = subprocess.run(["docker", "compose", "version", "--short"], cwd=ROOT,
+                                env=docker_environment(), text=True, check=True, capture_output=True)
+    except FileNotFoundError as error:
+        raise SystemExit("Docker CLI was not found. Install Docker Desktop or Docker Engine with Compose v2.32 or later.") from error
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(error.stderr.strip() or "Docker Compose is unavailable.") from error
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", result.stdout)
+    if not match or tuple(map(int, match.groups())) < MIN_COMPOSE:
+        version = result.stdout.strip() or "unknown"
+        raise SystemExit(f"Docker Compose {version} found; version 2.32.0 or later is required.")
+
+
+def print_login() -> None:
+    values = read_state()
+    port = values["DEV_PORT"]
+    if not port.isdecimal() or not 1 <= int(port) <= 65535:
+        raise SystemExit("DEV_PORT must be an integer from 1 to 65535")
+    print(f"Development site: http://localhost:{port}")
+    print(f"Development administrator: {values['SYSTEM_ADMIN_EMAIL']}")
+    print(f"Development password: {values['SYSTEM_ADMIN_PASSWORD']}")
+
+
+def show_help() -> None:
+    print("""Usage: bin/dev [command] [options]
+
+Commands:
+  up             Build and run the development stack in the foreground with Compose Watch (default)
+  setup          Create development and test databases, apply schema/data migrations and create an admin
+  logs [service] Follow Compose logs, optionally for one service
+  down           Stop this worktree's services and retain their data
+  reset --yes    Remove this worktree's services, volumes and generated local credentials
+  help           Show this help
+
+Requirements: Docker and Docker Compose 2.32.0 or later. Python 3 is the only host runtime dependency.
+Set DEV_PORT before a command to change the loopback browser port (default 3000).
+""")
+
+
+def prepare_environment() -> None:
+    run(compose_args("stop", "web", "worker", "assets"))
+    run(compose_args("build", "web"))
+    run(compose_args("up", "--detach", "--wait", "postgres", "redis"))
+    run(compose_args("run", "--rm", "--no-deps", "web", "bundle", "exec", "rails", "db:create", "db:migrate", "data:migrate"))
+    run(compose_args("run", "--rm", "--no-deps", "--env", "RAILS_ENV=test", "web", "bundle", "exec", "rails", "db:create", "db:migrate", "data:migrate"))
+    run(compose_args("run", "--rm", "--no-deps", "web", "bundle", "exec", "rails", "runner", "docker/development_admin.rb"))
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        argv = ["up"]
+    command = argv[0] if argv else "up"
+    if command in ("help", "--help", "-h") and len(argv) == 1:
+        show_help()
+        return 0
+    if command not in {"up", "setup", "logs", "down", "reset"}:
+        show_help()
+        return 2
+    if command in {"up", "setup", "down"} and len(argv) != 1:
+        raise SystemExit(f"Unexpected arguments for `bin/dev {command}`")
+    if command == "logs" and len(argv) > 2:
+        raise SystemExit("Usage: bin/dev logs [service]")
+    if command == "logs" and len(argv) == 2 and argv[1] not in {"web", "worker", "assets", "postgres", "redis"}:
+        raise SystemExit("Service must be one of: web, worker, assets, postgres, redis")
+    if command == "reset" and argv[1:] != ["--yes"]:
+        raise SystemExit("Reset deletes this worktree's database and local credentials. Confirm with: bin/dev reset --yes")
+
+    validate_port()
+    check_compose_version()
+    if command in {"up", "setup"}:
+        ensure_state()
+    else:
+        protect_existing_state()
+    try:
+        return dispatch(command, argv)
+    except subprocess.CalledProcessError as error:
+        print(f"Command failed with exit status {error.returncode}: {' '.join(error.cmd)}", file=sys.stderr)
+        return error.returncode
+    except KeyboardInterrupt:
+        if command == "up":
+            run(compose_args("stop"), check=False)
+            print("Stopped this worktree's development services; data was retained.", file=sys.stderr)
+        return 130
+
+
+def dispatch(command: str, argv: list[str]) -> int:
+    if command == "up":
+        prepare_environment()
+        print_login()
+        return run(compose_args("up", "--watch")).returncode
+    if command == "setup":
+        prepare_environment()
+        print_login()
+        print("Run `bin/dev up` to start Rails, Sidekiq and the asset watcher.")
+        return 0
+    if command == "logs":
+        return run(compose_args("logs", "--follow", "--no-color", *argv[1:])).returncode
+    if command == "down":
+        return run(compose_args("down")).returncode
+
+    result = run(compose_args("down", "--volumes", "--remove-orphans"), check=False)
+    if result.returncode != 0:
+        return result.returncode
+    run(["docker", "image", "rm", f"{project_name()}-app:development"], check=False, capture=True)
+    ENV_FILE.unlink(missing_ok=True)
+    LOCK_FILE.unlink(missing_ok=True)
+    try:
+        STATE_DIR.rmdir()
+    except OSError:
+        pass
+    print(f"Removed development project {project_name()} and its local credentials.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

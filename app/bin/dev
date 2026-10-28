@@ -1,14 +1,5 @@
 #!/usr/bin/env sh
-
-set -e
-
-bundle check || bundle install --jobs 20 --retry 5
-
-bin/rails decidim:upgrade db:migrate data:migrate
-
-if ! gem list foreman -i --silent; then
-  echo "Installing foreman..."
-  gem install foreman
-fi
-
-exec foreman start -f Procfile.dev "$@"
+cat >&2 <<'MESSAGE'
+This generated Rails helper is not the supported development launcher. From the repository root, run `bin/dev up` to start the development stack.
+MESSAGE
+exit 1

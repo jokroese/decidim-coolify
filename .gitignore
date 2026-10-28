@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 
 work/
+
+# Per-worktree development credentials and verification artefacts.
+.local/

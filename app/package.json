@@ -9,5 +9,8 @@
   "version": "0.1.0",
   "browserslist": [
     "extends @decidim/browserslist-config"
-  ]
+  ],
+  "devDependencies": {
+    "@decidim/dev": "0.32.1"
+  }
 }

@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd --gid 1000 decidim \
     && useradd --uid 1000 --gid 1000 --home-dir /app --no-create-home decidim
 
-FROM runtime AS build
+FROM runtime AS toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential git curl pkg-config libpq-dev libicu-dev libyaml-dev libssl-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -22,6 +22,8 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+FROM toolchain AS build
 COPY app/Gemfile app/Gemfile.lock ./
 RUN bundle install --jobs 4 && rm -rf /usr/local/bundle/cache
 COPY app/package.json app/package-lock.json ./
@@ -46,11 +48,36 @@ RUN case "$TARGETARCH" in \
     && echo "$checksum  /usr/local/bin/supercronic" | sha256sum -c - \
     && chmod 755 /usr/local/bin/supercronic
 
+# Editable local development image. This stage reuses the base toolchain, installs
+# the complete locked development bundle and npm tree, and skips production builds.
+FROM toolchain AS development
+ENV RAILS_ENV=development \
+    BUNDLE_WITHOUT= \
+    BUNDLE_DEPLOYMENT=0 \
+    BUNDLE_FROZEN=true \
+    RAILS_LOG_TO_STDOUT=1 \
+    RAILS_SERVE_STATIC_FILES=1
+COPY app/Gemfile app/Gemfile.lock ./
+RUN bundle install --jobs 4
+COPY app/package.json app/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY app/ ./
+COPY --chown=decidim:decidim docker/development-entrypoint docker/development_admin.rb ./docker/
+RUN chmod 755 /app/docker/development-entrypoint \
+    && mkdir -p /app/tmp/letter_opener /app/storage /app/tmp/pids /app/log /app/public/decidim-packs \
+    && touch /app/tailwind.config.js \
+    && chown decidim:decidim /app/tailwind.config.js /app/public \
+    && chown -R decidim:decidim /app/app /app/config /app/db /app/lib /app/test /app/tmp /app/storage /app/log /app/public/decidim-packs
+USER 1000:1000
+EXPOSE 3000
+ENTRYPOINT ["/app/docker/development-entrypoint"]
+CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
+
 FROM runtime AS app
 COPY --from=build /usr/local/bundle /usr/local/bundle
 COPY --from=build /usr/local/bin/supercronic /usr/local/bin/supercronic
 COPY --from=build --chown=decidim:decidim /app /app
-COPY --chown=decidim:decidim docker/ /app/docker/
+COPY --chown=decidim:decidim docker/entrypoint docker/check_configuration.rb docker/prepare.rb docker/healthcheck.rb docker/maintenance.rb docker/crontab /app/docker/
 RUN mkdir -p storage tmp/pids log && chown -R decidim:decidim storage tmp log \
     && chmod 755 docker/entrypoint
 USER 1000:1000
