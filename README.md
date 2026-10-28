@@ -75,6 +75,6 @@ Check real email delivery, background jobs and an uploaded organisation logo. Ar
 
 [Look after your site and get help](OPERATIONS.md).
 
-[Help develop this project](CONTRIBUTING.md).
+[Help develop this project](CONTRIBUTING.md). Broader research and experiments live in [Decidim Lab](https://github.com/jokroese/decidim-lab).
 
 [Coolify's Compose guide](https://coolify.io/docs/applications/builds/docker-compose) explains routing and generated variables; labels can vary by version.
