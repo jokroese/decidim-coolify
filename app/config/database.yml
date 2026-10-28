@@ -1,5 +1,25 @@
+development:
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("DB_HOST", "127.0.0.1") %>
+  port: <%= ENV.fetch("DB_PORT", "5432") %>
+  database: decidim_development
+  username: <%= ENV.fetch("DB_USER", "decidim") %>
+  password: <%= ENV.fetch("DB_PASSWORD", "") %>
+  pool: <%= Integer(ENV.fetch("RAILS_MAX_THREADS", "5")) + 2 %>
+
+test:
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("DB_HOST", "127.0.0.1") %>
+  port: <%= ENV.fetch("DB_PORT", "5432") %>
+  database: decidim_test
+  username: <%= ENV.fetch("DB_USER", "decidim") %>
+  password: <%= ENV.fetch("DB_PASSWORD", "") %>
+  pool: <%= Integer(ENV.fetch("RAILS_MAX_THREADS", "5")) + 2 %>
+
 production:
   adapter: postgresql
   encoding: unicode
   pool: <%= Integer(ENV.fetch("RAILS_MAX_THREADS", "5")) + 2 %>
-  url: <%= ENV["DATABASE_URL"].to_s.inspect %>
+  url: <%= ENV.fetch("RAILS_ENV", "development") == "production" ? ENV.fetch("DATABASE_URL").inspect : "null" %>

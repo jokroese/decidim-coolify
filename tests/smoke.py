@@ -17,6 +17,9 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.image_checks import image_platform, resolve_image
+
 COMPOSE = ROOT / "compose.yaml"
 ENV_EXAMPLE = ROOT / ".env.example"
 UP_TIMEOUT = 600
@@ -77,10 +80,61 @@ def redact(output: str, values: dict[str, str]) -> str:
     return output
 
 
+def cleanup_project(base: list[str], project: str, env: dict[str, str]) -> list[str]:
+    """Remove and verify only resources carrying this Compose project name."""
+    errors: list[str] = []
+    try:
+        cleanup = subprocess.run(base + ["down", "--volumes", "--remove-orphans"], cwd=ROOT,
+                                 env=env, text=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, timeout=120, check=False)
+        if cleanup.returncode:
+            errors.append("compose down failed: " + cleanup.stdout.strip())
+    except (OSError, subprocess.SubprocessError) as error:
+        errors.append("compose down failed: " + str(error))
+    checks = (
+        ("containers", base + ["ps", "--all", "--quiet"]),
+        ("volumes", ["docker", "volume", "ls", "--quiet", "--filter", f"label=com.docker.compose.project={project}"]),
+        ("networks", ["docker", "network", "ls", "--quiet", "--filter", f"label=com.docker.compose.project={project}"]),
+    )
+    for resource, args in checks:
+        try:
+            remaining = subprocess.run(args, cwd=ROOT, env=env, text=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       timeout=30, check=False)
+            if remaining.returncode:
+                errors.append(f"could not verify disposable {resource} removal: {remaining.stdout.strip()}")
+            elif remaining.stdout.strip():
+                errors.append(f"disposable project still owns {resource}: {remaining.stdout.strip()}")
+        except (OSError, subprocess.SubprocessError) as error:
+            errors.append(f"could not verify disposable {resource} removal: {error}")
+    return errors
+
+
+def app_image_override(image_id: str) -> dict[str, dict[str, str]]:
+    """Use one already-resolved immutable image for every application role."""
+    return {role: {"image": image_id} for role in ("web", "worker", "scheduler")}
+
+
 def main() -> int:
     if not COMPOSE.is_file() or not ENV_EXAMPLE.is_file():
         print("FAIL: run this script from the project containing compose.yaml and .env.example", file=sys.stderr)
         return 2
+
+    source_image = os.environ.get("SMOKE_IMAGE", "").strip()
+    if not source_image:
+        print("SMOKE TEST FAILED: SMOKE_IMAGE is required (set it to an image tag, digest or local image ID)", file=sys.stderr)
+        return 2
+    try:
+        image = resolve_image(source_image, os.environ.get("SMOKE_PLATFORM"))
+        platform = image_platform(image)
+    except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+        print("SMOKE TEST FAILED: " + str(error), file=sys.stderr)
+        return 1
+    revision = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False).stdout.strip() or "unknown"
+    dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False).stdout.strip())
+    print(f"SMOKE IMAGE: source={source_image} revision={revision} dirty={str(dirty).lower()} platform={platform} immutable_id={image}")
 
     project = "decidim-smoke-" + secrets.token_hex(5)
     values = fixture_values()
@@ -90,11 +144,8 @@ def main() -> int:
         env_file.write_text("".join(f"{key}={value}\n" for key, value in values.items()))
         # A disposable override selects the test build without making the
         # production image configurable through Coolify environment variables.
-        image = os.environ.get("SMOKE_IMAGE", "decidim-coolify:test")
         override = Path(temp_dir) / "smoke.compose.json"
-        override.write_text(json.dumps({"services": {
-            role: {"image": image} for role in ("web", "worker", "scheduler")
-        }}))
+        override.write_text(json.dumps({"services": app_image_override(image)}))
         base = [
             "docker", "compose", "--project-name", project,
             "--env-file", str(env_file), "-f", str(COMPOSE), "-f", str(override),
@@ -123,6 +174,7 @@ def main() -> int:
             checkpoint = now
 
         started = False
+        return_code = 1
         try:
             resolved = run(["config", "--format", "json"])
             config = json.loads(resolved.stdout)
@@ -135,7 +187,7 @@ def main() -> int:
             if any("build" in service for service in services.values()):
                 raise RuntimeError("Compose must use the supplied app image, not build from a local context")
             if {services[role]["image"] for role in ("web", "worker", "scheduler")} != {image}:
-                raise RuntimeError("The temporary override must select the same test image for all app roles")
+                raise RuntimeError("The temporary override must select the same immutable test image for all app roles")
             for key in ("SYSTEM_ADMIN_EMAIL", "INITIAL_SYSTEM_ADMIN_PASSWORD"):
                 if key in services["worker"].get("environment", {}) or key in services["scheduler"].get("environment", {}):
                     raise RuntimeError(f"Bootstrap-only variable {key} must be set on web only")
@@ -144,7 +196,21 @@ def main() -> int:
             run(["pull", "database", "redis"], timeout=UP_TIMEOUT)
             started = True
             run(["up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", str(UP_TIMEOUT)], timeout=UP_TIMEOUT + 60)
-            report(f"all five services became healthy in disposable project {project}")
+            for role in ("web", "worker", "scheduler"):
+                container_ids = run(["ps", "--quiet", role]).stdout.split()
+                if len(container_ids) != 1:
+                    raise RuntimeError(f"Expected exactly one {role} container, got {len(container_ids)}")
+                inspected = subprocess.run(
+                    ["docker", "inspect", "--format", "{{.Image}}", container_ids[0]],
+                    cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, timeout=30, check=False,
+                )
+                if inspected.returncode:
+                    raise RuntimeError(f"Could not inspect {role} container: {inspected.stdout.strip()}")
+                actual_image = inspected.stdout.strip()
+                if actual_image != image:
+                    raise RuntimeError(f"{role} container uses image {actual_image}, expected immutable ID {image}")
+            report(f"all five services became healthy in disposable project {project} with the selected immutable image")
 
             for role in ("web", "worker", "scheduler"):
                 uid = run(["exec", "-T", role, "id", "-u"]).stdout.strip()
@@ -301,22 +367,27 @@ puts "SMOKE_API_DOCS_OK"'''
             if "SMOKE_API_DOCS_OK" not in runner(docs_check):
                 raise RuntimeError("Generated API documentation or its compiled asset failed")
             report("generated API documentation, a schema page and their compiled assets are served")
-            print("SMOKE TEST PASSED")
-            return 0
+            return_code = 0
         except KeyboardInterrupt:
             print("Interrupted; removing only the disposable smoke project.", file=sys.stderr)
-            return 130
+            return_code = 130
         except (OSError, subprocess.SubprocessError, RuntimeError, json.JSONDecodeError) as error:
             print("SMOKE TEST FAILED: " + redact(str(error), values), file=sys.stderr)
             if started:
-                logs = run(["logs", "--tail", "100", "web", "worker", "scheduler", "database", "redis"], timeout=60, check=False)
-                print("Recent disposable-project logs:\n" + redact(logs.stdout, values), file=sys.stderr)
-            return 1
+                try:
+                    logs = run(["logs", "--tail", "100", "web", "worker", "scheduler", "database", "redis"], timeout=60, check=False)
+                    print("Recent disposable-project logs:\n" + redact(logs.stdout, values), file=sys.stderr)
+                except (OSError, subprocess.SubprocessError, RuntimeError) as diagnostic_error:
+                    print("Could not retrieve disposable-project logs: " + redact(str(diagnostic_error), values), file=sys.stderr)
+            return_code = 1
         finally:
-            # The generated project name scopes volume removal to this test only.
-            subprocess.run(base + ["down", "--volumes", "--remove-orphans"], cwd=ROOT,
-                           env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=120, check=False)
+            # Compose's generated project name scopes cleanup to this test only.
+            for cleanup_error in cleanup_project(base, project, env):
+                print("SMOKE CLEANUP FAILED: " + redact(cleanup_error, values), file=sys.stderr)
+                return_code = 1
+        if return_code == 0:
+            print("SMOKE TEST PASSED (including disposable resource cleanup)")
+        return return_code
 
 
 if __name__ == "__main__":

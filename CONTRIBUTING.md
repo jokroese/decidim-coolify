@@ -4,7 +4,7 @@ Help collectives set up and maintain Decidim with less technical work. Keep the 
 
 ## Help make setup ready
 
-The [verification record](VERIFICATION.md) distinguishes completed checks from untested deployment steps. Before describing setup as self-service:
+Public images are available, but public routing, real email delivery and backup/recovery still need verification on a target Coolify installation. Passing local or CI tests does not establish deployment readiness. Before describing setup as self-service:
 
 1. Publish an image, test its digest and pin it in the deployment configuration.
 2. Follow the README on a clean Coolify installation. Record the Coolify version, server architecture and resource usage; correct missing or misleading steps.
@@ -22,58 +22,94 @@ The [verification record](VERIFICATION.md) distinguishes completed checks from u
 | Readiness, worker and scheduler checks | [healthcheck.rb](docker/healthcheck.rb) |
 | Recurring jobs | [crontab](docker/crontab), [maintenance.rb](docker/maintenance.rb) |
 | Rails configuration and dependency versions | [app/](app/) |
+| Editable development environment | [bin/dev](bin/dev), [compose.development.yaml](compose.development.yaml) |
+| Check entry points and image selection | [bin/check](bin/check), [tools/image_checks.py](tools/image_checks.py) |
 | Deployment validation and runtime checks | [validate.py](validate.py), [tests/](tests/) |
 | CI and image publication | [images.yml](.github/workflows/images.yml) |
 
-`app/` is the Rails application hosting Decidim. Decidim itself comes from locked upstream gems and frontend packages. Normal builds use the committed application; they do not regenerate it. Ruby and Node base images are pinned by digest. Node and compilation tools remain in the build stage.
+`app/` is the Rails application hosting Decidim. Decidim itself comes from locked upstream gems and frontend packages. Normal builds use the committed application; they do not regenerate it. Ruby and Node base images are pinned by digest. Node and compilation tools are excluded from the production runtime image; the development image includes them.
+
+## Local development
+
+Install Python 3, Git and Docker with Compose 2.32 or later. Start Docker before running these commands from the repository root. Ruby, Node and application dependencies run in containers; the first build needs network access and disk space. macOS with Docker Desktop and Linux Docker hosts are supported.
+
+```sh
+bin/dev up
+```
+
+This builds the development image, prepares isolated databases and starts Rails, PostgreSQL, Redis, Sidekiq and the asset watcher. It prints the local browser URL and synthetic administrator login. It does not run Decidim's application upgrade task or seed example organisations.
+
+Open the reported URL with `/system` to sign in. Create an organisation for hostname `localhost`. Development email is captured at `/letter_opener`; no real SMTP credentials are needed. The production-only email-pending behaviour is covered by the production image smoke tests, not by development email capture.
+
+Compose Watch synchronises source changes. Refresh the browser after editing a template or after the asset watcher recompiles JavaScript/CSS. Configuration changes restart affected processes; dependency manifest changes rebuild the development image. Installed dependencies remain inside the container. The scheduler is not part of the development stack.
+
+Each worktree has its own Compose project, database, uploads and generated credentials. The browser listens on loopback port 3000. Set `DEV_PORT=3001 bin/dev up` to run a second worktree on a different port. Development credentials live in the ignored `.local/dev/` directory and remain stable across restarts. Do not copy production settings into that directory.
+
+| Command | Result |
+| --- | --- |
+| `bin/dev up` | Prepare and start the editable environment, then watch source changes |
+| `bin/dev logs` | Follow this worktree's service logs |
+| `bin/dev logs web` | Follow one service's logs |
+| `bin/dev down` | Stop this worktree's environment and keep its data |
+| `bin/dev reset --yes` | Delete this worktree's development data and generated credentials |
+
+Reset is destructive only to this development project. Use it deliberately; a normal restart does not require resetting data. Never use production volumes for development.
+
+### Verify a browser change
+
+1. Sign in at `/system`, including an unsuccessful attempt before the successful one.
+2. Create an organisation, check validation messages and follow its administrator invitation from `/letter_opener`.
+3. Use the keyboard to reach and operate the changed controls. Repeat organisation creation with JavaScript disabled, using another disposable organisation.
+4. Edit a template and a JavaScript/CSS source file; confirm the changes appear after refresh without rebuilding the production image.
+5. Restart the stack and confirm the organisation and an uploaded logo remain. Record any unverified step in the contribution.
+
+If startup fails, read the named service's logs. An occupied browser port requires a different `DEV_PORT`; a Docker connection error requires starting Docker. Fix the failing source or configuration before retrying. `bin/dev --help` lists the supported commands. The generated application-level setup helpers are not a second supported development workflow.
 
 ## Build and check a change
 
-Clone the repository and run the following commands from its root. Install Docker with Compose v2, Node.js 22 or later and Python 3; builds also need network access and free disk space for dependencies and compiled assets. Python tests use the standard library. Ruby migration tests run inside the image.
-
-Run the quick checks first:
+Run checks from the repository root. The same entry points are used locally and in CI:
 
 ```sh
-node --test tests/organisation_setup_test.mjs
-python3 validate.py --allow-unpublished-image
-python3 -m unittest discover -s tests -p "test_*.py"
+bin/check quick
+bin/check full
 ```
 
-Validation uses disposable values and does not read the project's `.env` or start containers. The unpublished-image exception permits only the initial marker for development; it is never a deployment setting.
+`quick` checks internal documentation links and anchors, Compose configuration, Python contracts, Ruby unit behaviour and JavaScript organisation-name suggestions. Ruby and Node use the locked development tool image; quick checks do not start application services or compile production assets. The initial tool-image build can take time; subsequent runs reuse Docker build layers.
 
-Build the changed source, then run the migration tests and full stack:
+`full` runs quick checks, builds the production image and runs the image-level tests and full disposable smoke stack. Each build has a unique tag, and subsequent tests use the captured immutable image ID. Concurrent worktrees cannot silently replace each other's tested image. Output records the checkout revision, whether it has changes, the image ID and the selected platform.
+
+Local builds default to the Docker host's architecture. To test another supported platform explicitly:
 
 ```sh
-docker build --platform linux/amd64 -t decidim-coolify:test .
-docker run --rm --network none --entrypoint bundle \
-  --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
-  decidim-coolify:test exec ruby /tests/migration_completeness_test.rb
-docker run --rm --network none --entrypoint ruby \
-  --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
-  decidim-coolify:test /tests/deployment_configuration_test.rb
-SMOKE_IMAGE=decidim-coolify:test SMOKE_PLATFORM=linux/amd64 python3 tests/smoke.py
+bin/check full --platform linux/amd64
+bin/check full --platform linux/arm64
 ```
 
-For a native ARM64 check, replace both `linux/amd64` values with `linux/arm64`. Emulation is slower. CI builds and tests both architectures on native runners. Changes limited to root Markdown files and Markdown under `docs/` run only the quick checks; all other changes, release tags and manual runs include container tests. Use the always-running `CI` check for branch protection: it fails if validation, change detection or required container tests fail.
+Emulation is slower. Release CI retains native amd64 and ARM64 jobs and uses `bin/check image` against each built image. To verify an existing local image or published digest, use `bin/check image --image IMAGE_REFERENCE --platform linux/amd64`, replacing `IMAGE_REFERENCE` with the actual reference. A supplied image ID must already exist for the requested platform; a published reference can be pulled.
 
-The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely named disposable project. It supplies its own test settings; no email account or Coolify installation is needed. Expect `PASS` output with elapsed seconds since the previous checkpoint and exit status 0. It checks migrations, initial administrator creation, health, compiled assets, API documentation, scheduled tasks, a worker job and upload persistence across restarts. It starts without SMTP, verifies the setup notice and explicit delivery failure, then adds SMTP and checks that delivery settings and the notice change.
+Changes limited to root Markdown files and Markdown under `docs/` run documentation checks without building the application. All other changes, release tags and manual runs include quick checks and both container architectures. Use the always-running `CI` check for branch protection: it fails if change detection, documentation or required quick/container checks fail.
 
-Read the failure output to identify the failed check and service logs. Fix the source, rebuild the image and rerun the relevant checks. The smoke test removes its own project and volumes on exit; if Docker becomes unavailable, confirm cleanup once it recovers. Never remove another project's volumes.
+The smoke test starts web, worker, scheduler, PostgreSQL and Redis in a uniquely named disposable project. It supplies its own settings; it does not read the project's `.env`. It checks migrations, administrator bootstrap, sign-in and organisation requests, health, assets, API documentation, scheduled tasks, worker processing and upload persistence. It verifies both missing and configured SMTP behaviour without sending real email. Each checkpoint reports elapsed time.
 
-This is the supported container test loop. It exposes no browser port and does not send real email or test Coolify routing. Use an isolated Coolify pilot for the [manual setup checks](README.md#set-up). A documented interactive development environment is still missing: `app/config/database.yml` configures production only, and `app/bin/dev` runs `decidim:upgrade` as well as migrations. Do not treat the generated Rails helpers as a ready-made local setup.
+Expect exit status 0 and passing checks. On failure, read the first failing check and service logs. Cleanup removes only the test's own project and volumes; failures to clean up are reported. Never remove another project's volumes. Direct invocation of `tests/smoke.py` requires an explicit `SMOKE_IMAGE` and accepts `SMOKE_PLATFORM`.
 
-For optional Ruby style and security checks, install the application bundle including development dependencies, then run `bin/ci` from `app/`. Those checks are separate from release CI.
+The production smoke loop has no browser port and does not establish working Coolify routing, real email delivery or recovery. Use an isolated Coolify pilot for the [manual setup checks](README.md#set-up). The editable development environment above serves a different purpose and does not replace release verification.
+
+For documentation alone, run `bin/check docs`. It uses a pinned Lychee container with networking disabled to check tracked Markdown and local heading anchors. External URLs are excluded; the initial checker-image pull requires network access. Add new Markdown files to Git's index before checking them.
+
+For optional Ruby style and security checks, run the application's `bin/ci` inside the development image. These checks remain separate from release CI.
 
 ## Choose checks for the change
 
 | Change | Verification |
 | --- | --- |
-| Documentation only | Follow the reader's path; check relative links, anchors and commands against the source. |
-| Compose, configuration or release references | Run validation and Python tests; run the smoke test if runtime behaviour changes. |
-| Application, dependencies, Dockerfile or process scripts | Rebuild; run migration tests and the full smoke test. |
-| Coolify setup, email or recovery | Complete the affected procedure on an isolated installation and record the result. |
+| Documentation only | `bin/check docs`; check documented commands against the source |
+| Compose, configuration or release references | `bin/check quick`; full image checks if runtime behaviour changes |
+| Application, dependencies, Dockerfile or process scripts | `bin/check full`; manually inspect changed browser behaviour |
+| Development environment or command launchers | Quick checks plus clean startup, edits, restart and worktree-isolation checks |
+| Coolify setup, email or recovery | Complete the affected procedure on an isolated installation and record the result |
 
-Include the problem, resulting behaviour and checks run in your contribution. Describe any setup changes a collective must make. If a required check could not run, record that limitation rather than claiming it passed.
+Include the problem, resulting behaviour and any setup changes a collective must make in your contribution. Link the relevant [CI run](https://github.com/jokroese/decidim-coolify/actions/workflows/images.yml) for automated results. Record manual checks and remaining limits in the PR description or release notes; identify the tested revision/image and architecture for runtime or deployment checks. Keep durable procedures and known limitations in the relevant guide, rather than maintaining a test-run diary.
 
 ## Source and generated files
 
@@ -138,8 +174,6 @@ Publish versioned tags such as `v0.1.0-rc.2` or `v0.1.0` for updates to be disco
 Dependabot preserves Docker tag families. While this pilot uses `-rc`, it follows later `-rc` tags. Moving to the first stable release is one reviewed change to the version and digest in the shared mapping; subsequent stable releases are proposed automatically. See [Dependabot’s tag policy](https://github.com/dependabot/dependabot-core/tree/main/docker#supported-tag-schemas).
 
 Checks run daily on weekdays; publication does not create a PR immediately. This project's own image is excluded from Dependabot's cooldown because publication already requires both architecture tests. To check sooner or inspect a failure, open **Insights → Dependency graph → Dependabot**, select the Docker Compose update job and use **Check for updates**. Dependabot PRs run the normal pull-request CI. Review and merging remain required; Coolify deployment remains manual.
-
-Keep the [verification record](VERIFICATION.md) current, with revision/image, architecture, commands, results and remaining limits.
 
 ## Technical references
 

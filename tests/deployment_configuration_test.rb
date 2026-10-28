@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 require "minitest/autorun"
-require "/app/lib/deployment_configuration"
+require "erb"
+require "yaml"
+require_relative "../app/lib/deployment_configuration"
 
 class DeploymentConfigurationTest < Minitest::Test
   def setup
@@ -86,5 +88,30 @@ class DeploymentConfigurationTest < Minitest::Test
   def test_disabled_delivery_fails_explicitly
     delivery = DeploymentConfiguration::SetupRequiredDelivery.new({})
     assert_raises(DeploymentConfiguration::EmailNotConfigured) { delivery.deliver!(Object.new) }
+  end
+
+  def test_production_database_url_is_not_required_by_development_or_test
+    %w[development test].each do |environment|
+      config = evaluate_database_config(environment)
+      assert_nil config.fetch("production").fetch("url"), "#{environment} must not resolve the production URL"
+    end
+  end
+
+  def test_production_database_url_remains_required_and_is_preserved
+    assert_raises(KeyError) { evaluate_database_config("production") }
+    config = evaluate_database_config("production", "postgresql://db.example/decidim")
+    assert_equal "postgresql://db.example/decidim", config.fetch("production").fetch("url")
+  end
+
+  private
+
+  def evaluate_database_config(environment, database_url = nil)
+    original_environment = ENV.to_hash
+    ENV["RAILS_ENV"] = environment
+    database_url ? ENV["DATABASE_URL"] = database_url : ENV.delete("DATABASE_URL")
+    source = File.read(File.expand_path("../app/config/database.yml", __dir__))
+    YAML.safe_load(ERB.new(source).result)
+  ensure
+    ENV.replace(original_environment)
   end
 end

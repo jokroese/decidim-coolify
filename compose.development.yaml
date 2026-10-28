@@ -1,0 +1,154 @@
+name: ${COMPOSE_PROJECT_NAME:?run bin/dev}
+
+x-development-build: &development-build
+  context: .
+  target: development
+
+x-development-environment: &development-environment
+  RAILS_ENV: development
+  DISABLE_SPRING: "1"
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: decidim
+  DB_PASSWORD: ${DB_PASSWORD:?run bin/dev}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?run bin/dev}@redis:6379/0
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?run bin/dev}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY:?run bin/dev}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:?run bin/dev}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?run bin/dev}
+  DEV_PORT: ${DEV_PORT:-3000}
+  SYSTEM_ADMIN_EMAIL: ${SYSTEM_ADMIN_EMAIL:?run bin/dev}
+  SYSTEM_ADMIN_PASSWORD: ${SYSTEM_ADMIN_PASSWORD:?run bin/dev}
+
+x-development-watch: &development-watch
+  - action: sync
+    path: ./app/app
+    target: /app/app
+    initial_sync: true
+  - action: sync
+    path: ./app/lib
+    target: /app/lib
+    initial_sync: true
+  - action: sync
+    path: ./app/test
+    target: /app/test
+    initial_sync: true
+  - action: sync+restart
+    path: ./app/config
+    target: /app/config
+    initial_sync: true
+  - action: sync+restart
+    path: ./app/db
+    target: /app/db
+    initial_sync: true
+  - action: rebuild
+    path: ./Dockerfile
+  - action: rebuild
+    path: ./app/Gemfile
+  - action: rebuild
+    path: ./app/Gemfile.lock
+  - action: rebuild
+    path: ./app/package.json
+  - action: rebuild
+    path: ./app/package-lock.json
+  - action: rebuild
+    path: ./app/bin
+  - action: rebuild
+    path: ./docker/development-entrypoint
+  - action: rebuild
+    path: ./docker/development_admin.rb
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+    environment:
+      POSTGRES_DB: decidim_development
+      POSTGRES_USER: decidim
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?run bin/dev}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U decidim -d decidim_development"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?run bin/dev}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?run bin/dev}
+    command:
+      - /bin/sh
+      - -ec
+      - 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass "$${REDIS_PASSWORD}"'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'test "$$(redis-cli ping)" = PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  assets:
+    image: ${COMPOSE_PROJECT_NAME:?run bin/dev}-app:development
+    build: *development-build
+    environment: *development-environment
+    command: ["bin/shakapacker", "--watch"]
+    volumes:
+      - packs:/app/public/decidim-packs
+    develop:
+      watch: *development-watch
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/public/decidim-packs/manifest.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+
+  web:
+    image: ${COMPOSE_PROJECT_NAME:?run bin/dev}-app:development
+    build: *development-build
+    environment: *development-environment
+    command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:${DEV_PORT:-3000}:3000"
+    volumes:
+      - packs:/app/public/decidim-packs
+      - letter-opener:/app/tmp/letter_opener
+      - uploads:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      assets:
+        condition: service_healthy
+    develop:
+      watch: *development-watch
+
+  worker:
+    image: ${COMPOSE_PROJECT_NAME:?run bin/dev}-app:development
+    build: *development-build
+    environment: *development-environment
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml", "-t", "30"]
+    volumes:
+      - packs:/app/public/decidim-packs
+      - letter-opener:/app/tmp/letter_opener
+      - uploads:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      assets:
+        condition: service_healthy
+    develop:
+      watch: *development-watch
+
+volumes:
+  postgres-data:
+  redis-data:
+  packs:
+  letter-opener:
+  uploads:

@@ -107,6 +107,11 @@ begin
       setup_assert(admin.invitation_sent_at.present?, "configured invitation must use normal delivery")
       setup_assert(mail_jobs.call.any?, "configured invitation must enqueue mail")
     end
+    session.get "/system/"
+    setup_assert(session.response.status == 200, "existing-organisation system dashboard must render for an authenticated administrator: #{session.response.status}")
+    dashboard = setup_document(session)
+    expected_heading = I18n.t("decidim.system.dashboard.show.current_organizations", locale: :en)
+    setup_assert(dashboard.css("h2").any? { |heading| heading.text == expected_heading }, "existing-organisation dashboard content is missing")
     session.get "/system/organizations"
     setup_assert(session.response.body.include?("resend_invitation"), "pending invitation must be recoverable from list")
     before = mail_jobs.call.length

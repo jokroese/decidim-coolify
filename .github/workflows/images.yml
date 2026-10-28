@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   changes:
-    name: Validate and detect changes
+    name: Detect documentation-only changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -29,20 +29,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Validate deployment contract
-        run: |
-          python3 validate.py --allow-unpublished-image
-          python3 -m unittest discover -s tests -p "test_*.py"
-
-      - name: Set up Node for setup suggestion tests
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Test organisation name suggestions
-        run: node --test tests/organisation_setup_test.mjs
-
-      - name: Detect changes requiring container tests
+      - name: Detect changes requiring image checks
         if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: dorny/paths-filter@v4
         id: filter
@@ -55,8 +42,47 @@ jobs:
               - '!*.md'
               - '!docs/**/*.md'
 
-  test:
+  docs:
+    name: Documentation checks
     needs: changes
+    if: needs.changes.outputs.images != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Check tracked Markdown links and anchors
+        run: bin/check docs
+
+  quick:
+    name: Quick checks
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build development tools without production assets
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: development
+          load: true
+          tags: decidim-coolify:tools-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=development
+          cache-to: type=gha,mode=max,scope=development
+
+      - name: Run quick checks
+        run: bin/check quick
+        env:
+          CHECK_TOOL_IMAGE: decidim-coolify:tools-${{ github.run_id }}-${{ github.run_attempt }}
+
+  test:
+    needs: [changes, quick]
     if: needs.changes.outputs.images == 'true'
     name: Build and smoke-test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -81,50 +107,46 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build image and check upstream migration completeness
+      - name: Build production image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
+          target: app
           platforms: ${{ matrix.platform }}
-          tags: decidim-coolify:test
+          tags: decidim-coolify:test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
           load: true
           cache-from: type=gha,scope=smoke-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=smoke-${{ matrix.arch }}
 
-      - name: Test migration completeness failure cases
-        run: |
-          docker run --rm --network none --entrypoint bundle \
-            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
-            decidim-coolify:test exec ruby /tests/migration_completeness_test.rb
-
-      - name: Test first-run configuration
-        run: |
-          docker run --rm --network none --entrypoint ruby \
-            --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
-            decidim-coolify:test /tests/deployment_configuration_test.rb
-
-      - name: Smoke-test image
-        run: python3 -u tests/smoke.py
+      - name: Verify the built image and disposable stack
+        run: bin/check image --image "$TEST_IMAGE" --platform "$TEST_PLATFORM"
         env:
-          SMOKE_IMAGE: decidim-coolify:test
+          TEST_IMAGE: decidim-coolify:test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          TEST_PLATFORM: ${{ matrix.platform }}
 
   ci:
     name: CI
     if: always()
-    needs: [changes, test]
+    needs: [changes, docs, quick, test]
     runs-on: ubuntu-24.04
     steps:
       - name: Check required results
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           IMAGES_REQUIRED: ${{ needs.changes.outputs.images }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          QUICK_RESULT: ${{ needs.quick.result }}
           TEST_RESULT: ${{ needs.test.result }}
         run: |
           test "$CHANGES_RESULT" = success
           if [ "$IMAGES_REQUIRED" = true ]; then
+            test "$DOCS_RESULT" = skipped
+            test "$QUICK_RESULT" = success
             test "$TEST_RESULT" = success
           else
+            test "$DOCS_RESULT" = success
+            test "$QUICK_RESULT" = skipped
             test "$TEST_RESULT" = skipped
           fi
 
@@ -177,6 +199,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          target: app
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.values }}

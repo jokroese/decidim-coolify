@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""Run the repository's local checks and isolated image verification."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from contextlib import contextmanager
+from time import monotonic
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+LYCHEE_IMAGE = "lycheeverse/lychee:0.24.2@sha256:e2d19e57cf6ab037026f20b8e449a1f30d9d7f81eef4194763aab2eab20bd28d"
+SUPPORTED_PLATFORMS = {"linux/amd64", "linux/arm64"}
+
+
+def elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, remainder = divmod(seconds, 60)
+    return f"{int(minutes)}m {remainder:.1f}s"
+
+
+@contextmanager
+def timed_stage(name: str):
+    started = monotonic()
+    try:
+        yield
+    except KeyboardInterrupt:
+        print(f"INTERRUPTED {name} ({elapsed(monotonic() - started)})", flush=True)
+        raise
+    except BaseException:
+        print(f"FAIL {name} ({elapsed(monotonic() - started)})", flush=True)
+        raise
+    else:
+        print(f"PASS {name} ({elapsed(monotonic() - started)})", flush=True)
+
+
+def docker_process_environment(env: dict[str, str] | None = None) -> dict[str, str]:
+    result = dict(os.environ if env is None else env)
+    result.pop("DOCKER_DEFAULT_PLATFORM", None)
+    return result
+
+
+def run(args: list[str], *, env: dict[str, str] | None = None) -> None:
+    print("+ " + " ".join(args), flush=True)
+    subprocess.run(args, cwd=ROOT, env=docker_process_environment(env), check=True)
+
+
+def run_capture(args: list[str]) -> str:
+    print("+ " + " ".join(args), flush=True)
+    result = subprocess.run(args, cwd=ROOT, env=docker_process_environment(),
+                            text=True, capture_output=True, check=False)
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"command failed with exit status {result.returncode}: {detail}")
+    return result.stdout
+
+
+def require_program(name: str, hint: str) -> None:
+    from shutil import which
+
+    if which(name) is None:
+        raise RuntimeError(f"{name} is required; {hint}")
+
+
+def check_docker() -> None:
+    require_program("docker", "install Docker with Compose v2 and start its daemon")
+    try:
+        subprocess.run(["docker", "info"], cwd=ROOT, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError("Docker is installed but its daemon is unavailable") from error
+
+
+def platform_value(value: str | None) -> str | None:
+    if value is not None and value not in SUPPORTED_PLATFORMS:
+        raise argparse.ArgumentTypeError(
+            f"unsupported platform {value!r}; choose linux/amd64 or linux/arm64"
+        )
+    return value
+
+
+def repository_state() -> tuple[str, str]:
+    revision = subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT,
+                              check=True, text=True, capture_output=True).stdout.strip()
+    changes = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                             check=True, text=True, capture_output=True).stdout
+    return revision, "dirty" if changes else "clean"
+
+
+def unique_image_tag(kind: str) -> str:
+    digest = hashlib.sha256(str(ROOT).encode()).hexdigest()[:10]
+    return f"decidim-coolify-{kind}:{digest}-{uuid.uuid4().hex[:12]}"
+
+
+def markdown_files() -> list[str]:
+    output = subprocess.run(["git", "ls-files", "-z", "--", "*.md", "*.markdown"],
+                            cwd=ROOT, check=True, capture_output=True).stdout
+    return [str(ROOT / path.decode()) for path in output.split(b"\0") if path]
+
+
+def docs_check() -> None:
+    files = markdown_files()
+    if not files:
+        print("No tracked Markdown files found.")
+        return
+    with timed_stage("Markdown links and anchors"):
+        check_docker()
+        command = ["docker", "run", "--rm", "--network", "none",
+                   "--mount", f"type=bind,source={ROOT},target=/workspace,readonly",
+                   "--workdir", "/workspace", LYCHEE_IMAGE,
+                   "--offline", "--include-fragments", "--root-dir", "/workspace",
+                   "--no-progress", *files]
+        # Convert host absolute paths to their read-only mount paths.
+        command[-len(files):] = ["/workspace/" + Path(path).relative_to(ROOT).as_posix()
+                                 for path in files]
+        run(command)
+
+
+def build_development_image() -> str:
+    with timed_stage("development tools image"):
+        return _build_development_image()
+
+
+def _build_development_image() -> str:
+    explicit = os.environ.get("CHECK_TOOL_IMAGE")
+    from tools.image_checks import image_platform, resolve_image
+
+    if explicit:
+        check_docker()
+        local_image = subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", explicit],
+                                     cwd=ROOT, text=True, capture_output=True, check=False)
+        if local_image.returncode:
+            raise RuntimeError(
+                f"CHECK_TOOL_IMAGE {explicit!r} is not available locally; build it first"
+            )
+        try:
+            image_id = resolve_image(local_image.stdout.strip())
+        except RuntimeError as error:
+            raise RuntimeError(f"CHECK_TOOL_IMAGE {explicit!r} is unavailable: {error}") from error
+        print(f"Using development tools image: {image_id} ({image_platform(image_id)})", flush=True)
+        return image_id
+    check_docker()
+    tag = unique_image_tag("development")
+    with tempfile.TemporaryDirectory(prefix="decidim-check-") as temp:
+        iidfile = str(Path(temp) / "image-id")
+        run(["docker", "build", "--target", "development", "--tag", tag,
+             "--iidfile", iidfile, "."])
+        image_id = Path(iidfile).read_text(encoding="utf-8").strip()
+        print(f"Development tools image: {image_id} ({image_platform(image_id)})", flush=True)
+        return image_id
+
+
+def run_local_checks() -> str:
+    require_program("python3", "install Python 3")
+    require_program("git", "install Git")
+    revision, state = repository_state()
+    print(f"Source: {revision} ({state})", flush=True)
+    docs_check()
+    with timed_stage("deployment validation"):
+        run(["python3", "validate.py", "--allow-unpublished-image"])
+    with timed_stage("Python unit tests"):
+        run(["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"])
+
+    dev_image = build_development_image()
+    with timed_stage("development image dependency lockfiles"):
+        verify_development_image_lockfiles(dev_image)
+    mount = ["--mount", f"type=bind,source={ROOT},target=/workspace,readonly"]
+    with timed_stage("Ruby migration tests"):
+        run(["docker", "run", "--rm", "--network", "none", *mount,
+             "--env", "BUNDLE_GEMFILE=/app/Gemfile", "--entrypoint", "bundle", dev_image,
+             "exec", "ruby", "/workspace/tests/migration_completeness_test.rb"])
+    with timed_stage("Ruby configuration tests"):
+        run(["docker", "run", "--rm", "--network", "none", *mount,
+             "--env", "BUNDLE_GEMFILE=/app/Gemfile", "--entrypoint", "bundle", dev_image,
+             "exec", "ruby", "/workspace/tests/deployment_configuration_test.rb"])
+    with timed_stage("Node setup tests"):
+        run(["docker", "run", "--rm", "--network", "none", *mount,
+             "--entrypoint", "node", dev_image, "--test",
+             "/workspace/tests/organisation_setup_test.mjs"])
+    return dev_image
+
+
+def verify_development_image_lockfiles(image: str) -> None:
+    files = ("Gemfile", "Gemfile.lock", "package.json", "package-lock.json")
+    image_paths = [f"/app/{path}" for path in files]
+    checkout_paths = [f"/workspace/app/{path}" for path in files]
+    mount = ["--mount", f"type=bind,source={ROOT},target=/workspace,readonly"]
+    output = run_capture(["docker", "run", "--rm", "--network", "none", *mount,
+                          "--entrypoint", "sha256sum", image,
+                          *image_paths, *checkout_paths])
+    actual: dict[str, str] = {}
+    for line in output.splitlines():
+        digest, path = line.split(maxsplit=1)
+        actual[path] = digest
+    for name in files:
+        image_digest = actual.get(f"/app/{name}")
+        checkout_digest = actual.get(f"/workspace/app/{name}")
+        if image_digest is None or checkout_digest is None:
+            raise RuntimeError(f"could not read {name} from CHECK_TOOL_IMAGE and checkout")
+        if image_digest != checkout_digest:
+            raise RuntimeError(
+                f"CHECK_TOOL_IMAGE is stale: /app/{name} differs from app/{name} in checkout"
+            )
+
+
+def image_checks(image: str, platform: str | None) -> None:
+    from tools.image_checks import image_platform, resolve_image
+
+    with timed_stage("image resolution"):
+        check_docker()
+        resolved = resolve_image(image, platform)
+        actual_platform = image_platform(resolved)
+        revision, state = repository_state()
+        print(f"Checkout: {revision} ({state}); platform: {actual_platform}; "
+              f"input image: {image}; resolved ID: {resolved}", flush=True)
+    mount = ["--mount", f"type=bind,source={ROOT / 'tests'},target=/tests,readonly"]
+    platform_args = ["--platform", platform] if platform else []
+    with timed_stage("image Ruby migration tests"):
+        run(["docker", "run", "--rm", "--network", "none", *platform_args, *mount,
+             "--env", "BUNDLE_GEMFILE=/app/Gemfile", "--entrypoint", "bundle", resolved,
+             "exec", "ruby", "/tests/migration_completeness_test.rb"])
+    with timed_stage("image Ruby configuration tests"):
+        run(["docker", "run", "--rm", "--network", "none", *platform_args, *mount,
+             "--env", "BUNDLE_GEMFILE=/app/Gemfile", "--entrypoint", "ruby", resolved,
+             "/tests/deployment_configuration_test.rb"])
+    smoke_env = sanitized_smoke_environment(resolved, platform)
+    with timed_stage("production smoke test"):
+        run(["python3", "-u", "tests/smoke.py"], env=smoke_env)
+
+
+def sanitized_smoke_environment(image: str, platform: str | None) -> dict[str, str]:
+    allowed = {"PATH", "HOME", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT",
+               "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "XDG_RUNTIME_DIR", "TMPDIR"}
+    env = {key: value for key, value in os.environ.items() if key in allowed}
+    env["SMOKE_IMAGE"] = image
+    if platform:
+        env["SMOKE_PLATFORM"] = platform
+    return env
+
+
+def full_checks(platform: str | None) -> None:
+    run_local_checks()
+    revision, state = repository_state()
+    tag = unique_image_tag("production")
+    with timed_stage("production image build"):
+        check_docker()
+        print(f"Building production image for {platform or 'native'} from {revision} ({state})",
+              flush=True)
+        with tempfile.TemporaryDirectory(prefix="decidim-check-") as temp:
+            iidfile = str(Path(temp) / "image-id")
+            args = ["docker", "build", "--tag", tag, "--iidfile", iidfile]
+            if platform:
+                args.extend(["--platform", platform])
+            args.append(".")
+            run(args)
+            image_id = Path(iidfile).read_text(encoding="utf-8").strip()
+            print(f"Production image: {image_id}", flush=True)
+    image_checks(image_id, platform)
+
+
+def parser() -> argparse.ArgumentParser:
+    root = argparse.ArgumentParser(prog="bin/check", description=__doc__)
+    commands = root.add_subparsers(dest="command")
+    commands.add_parser("quick", help="run docs, configuration, Ruby and Node checks")
+    full = commands.add_parser("full", help="run quick checks, build production, and smoke-test")
+    full.add_argument("--platform", type=platform_value, help="linux/amd64 or linux/arm64")
+    image = commands.add_parser("image", help="check an existing image reference")
+    image.add_argument("--image", required=True, help="image tag or digest to test")
+    image.add_argument("--platform", type=platform_value, help="linux/amd64 or linux/arm64")
+    commands.add_parser("docs", help="check tracked Markdown links and local fragments offline")
+    return root
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    command = args.command or "quick"
+    started = monotonic()
+    status = "PASS"
+    try:
+        if command == "quick":
+            run_local_checks()
+        elif command == "full":
+            full_checks(args.platform)
+        elif command == "image":
+            image_checks(args.image, args.platform)
+        elif command == "docs":
+            docs_check()
+        return 0
+    except KeyboardInterrupt:
+        status = "INTERRUPTED"
+        print("check interrupted", file=sys.stderr)
+        return 130
+    except (RuntimeError, subprocess.CalledProcessError, OSError) as error:
+        status = "FAIL"
+        print(f"check failed: {error}", file=sys.stderr)
+        return 1
+    finally:
+        print(f"{status} total {command} ({elapsed(monotonic() - started)})", flush=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
