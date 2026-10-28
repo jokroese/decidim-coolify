@@ -1,0 +1,28 @@
+<%# Adapted from decidim-system 0.32.1; keep the upstream authentication flow. %>
+<h2 class="h3"><%= setup_text(setup_first_run? ? "sign_in.setup_title" : "sign_in.title") %></h2>
+
+<% if setup_first_run? %>
+  <p class="mt-4"><%= setup_text("sign_in.introduction") %></p>
+<% end %>
+
+<%= decidim_form_for(resource, as: resource_name, url: session_path(resource_name)) do |f| %>
+  <div class="form__wrapper">
+    <%= f.email_field :email, autofocus: true, autocomplete: "username", help_text: setup_first_run? ? setup_text("sign_in.email_hint") : nil %>
+    <%= f.password_field :password, autocomplete: "current-password", help_text: setup_first_run? ? setup_text("sign_in.password_hint") : nil %>
+
+    <% if devise_mapping.rememberable? %>
+      <%= f.check_box :remember_me %>
+    <% end %>
+  </div>
+  <div class="form__wrapper-block">
+    <%= f.submit setup_text("sign_in.submit"), class: "button button__sm md:button__lg button__secondary" %>
+  </div>
+<% end %>
+
+<% if setup_first_run? %>
+  <p class="mt-4"><%= link_to setup_text("sign_in.credentials_link"), "https://github.com/jokroese/decidim-coolify#find-your-setup-credentials", target: "_blank", rel: "noopener noreferrer" %></p>
+<% end %>
+
+<div class="flex flex-col [&>a]:text-secondary hover:[&>a]:underline [&>a]:w-fit [&>a]:mt-4">
+  <%= render "decidim/system/devise/shared/links" %>
+</div>

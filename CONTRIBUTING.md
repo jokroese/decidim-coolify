@@ -29,11 +29,12 @@ The [verification record](VERIFICATION.md) distinguishes completed checks from u
 
 ## Build and check a change
 
-Clone the repository and run the following commands from its root. Install Docker with Compose v2 and Python 3; builds also need network access and free disk space for dependencies and compiled assets. Python tests use the standard library. Ruby migration tests run inside the image.
+Clone the repository and run the following commands from its root. Install Docker with Compose v2, Node.js 22 or later and Python 3; builds also need network access and free disk space for dependencies and compiled assets. Python tests use the standard library. Ruby migration tests run inside the image.
 
 Run the quick checks first:
 
 ```sh
+node --test tests/organisation_setup_test.mjs
 python3 validate.py --allow-unpublished-image
 python3 -m unittest discover -s tests -p "test_*.py"
 ```
@@ -144,6 +145,7 @@ Keep the [verification record](VERIFICATION.md) current, with revision/image, ar
 
 - [Configuration](docs/CONFIGURATION.md): required values, defaults and generated credentials.
 - [Operations](docs/OPERATIONS.md): deployment, backups, recovery and maintenance checks.
+- [Organisation setup and upstream plan](docs/ORGANISATION-SETUP.md): behaviour, audience, tests and local override removal.
 - [Upstream decisions](UPSTREAM.md): why this project maintains an image and when to revisit it.
 - [Dependency audit](DEPENDENCY-AUDIT.md): dated findings and follow-up work.
 - [Decidim 0.32.1 release](https://github.com/decidim/decidim/releases/tag/v0.32.1) and [versioned installation guidance](https://github.com/decidim/decidim/blob/v0.32.1/docs/modules/install/pages/index.adoc).

@@ -11,6 +11,17 @@ class DeploymentConfigurationTest < Minitest::Test
     }
   end
 
+  def test_secret_matches_decidim_without_changing_it
+    assert DeploymentConfiguration.read(@env.merge("SECRET_KEY_BASE" => "a" * 128))
+    ["", "a" * 64, "a" * 127, "a" * 129].each do |secret|
+      error = assert_raises(DeploymentConfiguration::Error) do
+        DeploymentConfiguration.read(@env.merge("SECRET_KEY_BASE" => secret))
+      end
+      assert_includes error.message, "128-character SECRET_KEY_BASE"
+      assert_includes error.message, "existing installation"
+    end
+  end
+
   def test_first_run_without_email_uses_domain_defaults
     settings = DeploymentConfiguration.read(@env, bootstrap: true)
     refute settings[:mail_enabled]

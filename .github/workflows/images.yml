@@ -34,6 +34,14 @@ jobs:
           python3 validate.py --allow-unpublished-image
           python3 -m unittest discover -s tests -p "test_*.py"
 
+      - name: Set up Node for setup suggestion tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test organisation name suggestions
+        run: node --test tests/organisation_setup_test.mjs
+
       - name: Detect changes requiring container tests
         if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: dorny/paths-filter@v4

@@ -49,6 +49,14 @@ class ComposeSetupTests(unittest.TestCase):
             for role in ("web", "worker", "scheduler"):
                 self.assertEqual(services[role]["environment"]["APP_URL"], domain)
 
+    def test_rails_secret_uses_the_128_character_generator_for_every_role(self):
+        secret = "ab12" * 32
+        services = self.resolve({"SERVICE_HEX_128_RAILS": secret, "SERVICE_PASSWORD_64_RAILS": "old-value"})
+        for role in ("web", "worker", "scheduler"):
+            self.assertEqual(services[role]["environment"]["SECRET_KEY_BASE"], secret)
+        self.assertIn("SERVICE_HEX_128_RAILS", validation.required_variable_names())
+        self.assertNotIn("SERVICE_PASSWORD_64_RAILS", validation.compose_variable_names())
+
     def test_app_roles_pull_the_same_git_owned_image(self):
         services = self.resolve({})
         images = {services[role]["image"] for role in ("web", "worker", "scheduler")}

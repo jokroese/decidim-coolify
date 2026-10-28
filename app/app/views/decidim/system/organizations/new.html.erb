@@ -1,0 +1,86 @@
+<%# Adapted from decidim-system 0.32.1; see docs/ORGANISATION-SETUP.md. %>
+<% add_decidim_page_title(setup_text("title")) %>
+<% provide :title do %>
+  <h1 class="h1"><%= setup_text("title") %></h1>
+<% end %>
+<%= append_javascript_pack_tag "organisation_setup", defer: false %>
+
+<%= decidim_form_for(@form, data: { organisation_setup: true }) do |f| %>
+  <div class="form__wrapper">
+    <%= f.text_field :name, label: setup_text("name"), autofocus: true, data: { setup_error: setup_text("errors.name") } %>
+    <%= f.text_field :short_name, label: setup_text("short_name"), help_text: setup_text("short_name_hint"), minlength: 3, maxlength: 12, data: { setup_error: setup_text("errors.short_name") } %>
+    <%= f.text_field :reference_prefix, label: setup_text("reference_prefix"), help_text: setup_text("reference_prefix_hint"), data: { setup_error: setup_text("errors.reference_prefix") } %>
+    <%= f.text_field :host, label: setup_text("host"), help_text: setup_text("host_hint"), data: { setup_error: setup_text("errors.host") } %>
+    <%= f.text_field :organization_admin_name, label: setup_text("admin_name"), autocomplete: "name", data: { setup_error: setup_text("errors.organization_admin_name") } %>
+    <%= f.email_field :organization_admin_email, label: setup_text("admin_email"), help_text: setup_text(setup_mail_pending? ? "admin_email_pending" : "admin_email_hint"), autocomplete: "email", data: { setup_error: setup_text("errors.organization_admin_email") } %>
+
+    <fieldset>
+      <legend><%= setup_text("languages") %></legend>
+      <div data-language-search-wrapper hidden>
+        <%= label_tag "setup-language-search", setup_text("language_search") %>
+        <%= search_field_tag nil, nil, id: "setup-language-search", autocomplete: "off", data: { language_search: true } %>
+      </div>
+      <%= f.error_for(:available_locales) %>
+      <%= f.error_for(:default_locale) %>
+      <div style="max-height: 20rem; overflow: auto;">
+      <table>
+        <thead><tr><th scope="col"><%= setup_text("languages") %></th><th scope="col"><%= setup_text("available_languages") %></th><th scope="col"><%= setup_text("default_language") %></th></tr></thead>
+        <tbody>
+          <% localized_locales.each do |locale| %>
+            <tr data-language-row>
+              <th scope="row"><%= locale.name %> (<%= locale.id %>)</th>
+              <td><%= check_box_tag "organization[available_locales][#{locale.id}]", locale.id, @form.available_locales.include?(locale.id), class: "!m-0", aria: { label: "#{setup_text('available_languages')}: #{locale.name}" } %></td>
+              <td><%= radio_button_tag "organization[default_locale]", locale.id, @form.default_locale == locale.id, class: "!m-0", aria: { label: "#{setup_text('default_language')}: #{locale.name}" } %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+      </div>
+      <p data-no-languages role="status" hidden><%= setup_text("no_languages") %></p>
+    </fieldset>
+
+    <fieldset>
+      <legend><%= setup_text("viewing") %></legend>
+      <%= f.check_box :force_users_to_authenticate_before_access_organization, label: setup_text("require_sign_in"), label_options: { class: "form__wrapper-checkbox-label" } %>
+    </fieldset>
+    <fieldset>
+      <legend><%= setup_text("registration") %></legend>
+      <p class="help-text"><%= setup_text("registration_hint") %></p>
+      <%= f.collection_radio_buttons :users_registration_mode, Decidim::Organization.users_registration_modes, :first, ->(mode) { setup_text("registration_#{mode.first}") } do |builder| %>
+        <%= builder.label(class: "form__wrapper-checkbox-label") { builder.radio_button + builder.text } %>
+      <% end %>
+    </fieldset>
+    <fieldset>
+      <legend><%= setup_text("verification") %></legend>
+      <p class="help-text"><%= setup_text("verification_hint") %></p>
+      <%= f.collection_check_boxes :available_authorizations, Decidim.authorization_workflows, :name, :description do |builder| %>
+        <%= builder.label(class: "form__wrapper-checkbox-label") { builder.check_box + builder.text } %>
+      <% end %>
+    </fieldset>
+
+    <details <%= "open" if @form.errors.any? %>>
+      <summary class="button button__sm button__secondary w-fit"><%= setup_text("advanced") %></summary>
+      <p class="help-text"><%= setup_text("advanced_hint") %></p>
+      <div class="form__wrapper">
+        <%= f.text_area :secondary_hosts, label: setup_text("secondary_hosts"), help_text: setup_text("secondary_hosts_hint") %>
+        <div class="border-2 rounded border-background p-4 form__wrapper">
+          <p class="help-text"><%= setup_text("smtp_hint") %></p>
+          <p><%= setup_text("sender_default", sender: Decidim.mailer_sender) %></p>
+          <% if setup_mail_pending? %><p><%= setup_text("smtp_pending") %></p><% end %>
+          <%= render partial: "smtp_settings", locals: { f: } %>
+        </div>
+        <div class="border-2 rounded border-background p-4 form__wrapper">
+          <h2 class="h4"><%= setup_text("external_sign_in") %></h2>
+          <p class="help-text"><%= setup_text("external_sign_in_hint") %></p>
+          <%= render partial: "omniauth_settings", locals: { f: } %>
+        </div>
+        <% %w(file_upload_settings csp_settings).each do |partial| %>
+          <div class="border-2 rounded border-background p-4 form__wrapper"><%= render partial: partial, locals: { f: } %></div>
+        <% end %>
+      </div>
+    </details>
+  </div>
+  <div class="form__wrapper-block">
+    <%= f.submit setup_text(setup_mail_pending? ? "create_pending" : "create"), class: "button button__sm md:button__lg button__primary" %>
+  </div>
+<% end %>
