@@ -1,0 +1,61 @@
+en:
+  organisation_setup:
+    sign_in:
+      setup_title: Set up your Decidim site
+      title: System administration
+      introduction: Sign in with the system administrator account created during deployment. Next, create your organisation.
+      email_hint: The SYSTEM_ADMIN_EMAIL address set in Coolify.
+      password_hint: Your current password, or SERVICE_PASSWORD_64_ADMIN from Coolify’s Environment Variables for your first sign-in.
+      submit: Sign in
+      credentials_link: Find your setup credentials
+    title: New organisation
+    name: Organisation name
+    short_name: Short name
+    short_name_hint: Shown beneath the app icon. Use 3–12 characters.
+    reference_prefix: Reference prefix
+    reference_prefix_hint: "Added to reference numbers for proposals, meetings and other content. For example, Riverside Community Garden could use RCG: RCG-PROP-2026-10-42."
+    host: Website domain
+    host_hint: "The domain only, for example participate.example.org, without https:// or a path."
+    secondary_hosts: Additional website domains
+    secondary_hosts_hint: One domain per line, without https://. Each needs routing and a certificate.
+    admin_name: Administrator’s name
+    admin_email: Administrator’s email address
+    admin_email_hint: Receives an invitation to set a password. This account is separate from your system administrator account.
+    admin_email_pending: A separate organisation administrator account. Send its invitation after setting up email.
+    languages: Languages
+    language_search: Find a language
+    available_languages: Available languages
+    default_language: Default language
+    no_languages: No languages match your search.
+    viewing: Viewing the site
+    require_sign_in: Require sign-in to view the site
+    registration: Who can create an account?
+    registration_enabled: Anyone can create an account
+    registration_existing: Only existing accounts can sign in
+    registration_disabled: Use an external sign-in provider only
+    registration_hint: This does not change who can browse the site. External sign-in needs a provider under advanced settings.
+    verification: Participant verification (optional)
+    verification_hint: Enable checks for activities such as voting. Choose where they are required within each activity.
+    advanced: Advanced settings
+    advanced_hint: Defaults suit most organisations.
+    smtp_hint: Leave blank to inherit email settings from Coolify. Any sender override must be authorised by your email provider.
+    smtp_pending: These fields do not enable email until it is configured in Coolify.
+    sender_default: "Inherited sender: %{sender}"
+    external_sign_in: External sign-in providers
+    external_sign_in_hint: Configure a provider to use external sign-in. Keep Developer disabled on public sites.
+    create: Create organisation & invite administrator
+    create_pending: Create organisation — invite administrator later
+    created_pending: Organisation created. The administrator invitation has not been sent. Configure email in Coolify, redeploy, then use Resend invitation in the organisations list.
+    invitation_pending: The invitation has not been sent. Configure email in Coolify and redeploy, then use Resend invitation.
+    email_notice: Email is not configured. Invitations, password resets and notifications cannot be sent. Configure email in Coolify and redeploy.
+    errors:
+      name: Enter the organisation name.
+      short_name: Enter a short name of 3–12 characters.
+      reference_prefix: Enter a reference prefix based on your organisation’s name.
+      host: Enter a website domain without https:// or a path.
+      organization_admin_name: Enter the administrator’s display name.
+      organization_admin_email: Enter a valid administrator email address.
+  devise:
+    failure:
+      admin:
+        unauthenticated: Sign in with your system administrator account to continue.

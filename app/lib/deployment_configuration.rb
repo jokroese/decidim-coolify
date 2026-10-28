@@ -39,6 +39,10 @@ module DeploymentConfiguration
       end
     end
 
+    if env.key?("SECRET_KEY_BASE") && env["SECRET_KEY_BASE"].to_s.length != 128
+      errors << "Decidim requires a 128-character SECRET_KEY_BASE. Check SERVICE_HEX_128_RAILS in Coolify. For an existing installation, follow the secret upgrade procedure before changing it."
+    end
+
     smtp_keys = %w[SMTP_ADDRESS SMTP_USERNAME SMTP_PASSWORD]
     mail_enabled = smtp_keys.any? { |key| !env[key].to_s.empty? }
     if mail_enabled

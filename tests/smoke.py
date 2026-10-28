@@ -53,6 +53,7 @@ def fixture_values() -> dict[str, str]:
         name: "aB7cD9eF2gH4iJ6k" * 4
         for name in compose_variables() if name.startswith("SERVICE_PASSWORD")
     })
+    values["SERVICE_HEX_128_RAILS"] = "a1b2c3d4" * 16
     return values
 
 
@@ -183,7 +184,7 @@ response = request.call("/system")
   response = request.call(location.request_uri.empty? ? "/" : location.request_uri)
 end
 abort "Unexpected sign-in response: #{response.code}" unless response.code == "200"
-abort "Email setup notice missing" unless response.body.include?("Email setup is pending") == (ENV["SMTP_ADDRESS"].to_s.empty?)
+abort "Email instructions appeared before sign-in" if response.body.include?("Outgoing email") || response.body.include?("Email is not configured")
 abort "Sign-in response is not HTML" unless response["content-type"].to_s.include?("text/html")
 abort "Sign-in page has no HTML document" unless response.body.match?(/<html\b/i)
 assets = response.body.scan(/(?:href|src)=["']([^"']+)["']/i).flatten
@@ -211,7 +212,17 @@ rescue DeploymentConfiguration::EmailNotConfigured
 end'''
             if "SMOKE_EMAIL_PENDING_OK" not in runner(mail_disabled):
                 raise RuntimeError("Unconfigured mail did not fail explicitly")
-            print("PASS: startup without SMTP shows a setup notice and refuses delivery explicitly")
+            print("PASS: startup without SMTP permits sign-in and refuses delivery explicitly")
+
+            sign_in_check = (ROOT / "tests" / "system_sign_in_check.rb").read_text()
+            if "SMOKE_SYSTEM_SIGN_IN_OK" not in run(["exec", "-T", "web", "bundle", "exec", "ruby", "-e", sign_in_check]).stdout:
+                raise RuntimeError("System sign-in HTTP checks did not complete")
+            print("PASS: failed sign-in shows its error and valid credentials reach organisation setup")
+
+            setup_check = (ROOT / "tests" / "organisation_setup_check.rb").read_text()
+            if "SMOKE_ORGANISATION_SETUP_OK" not in runner(setup_check):
+                raise RuntimeError("Organisation setup without email failed")
+            print("PASS: organisation form, validation, access controls and deferred invitation")
 
             # Complete email setup without replacing volumes or bootstrap secrets.
             values.update({"SMTP_ADDRESS": "smtp.example.invalid", "SMTP_USERNAME": "smoke-user",
@@ -220,8 +231,12 @@ end'''
             run(["up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", str(UP_TIMEOUT)], timeout=UP_TIMEOUT + 60)
             runner('settings = Rails.application.config.action_mailer.smtp_settings; raise "SMTP TLS verification disabled" unless settings[:openssl_verify_mode] == "peer" && settings[:enable_starttls] == true; raise "SMTP not enabled" unless Rails.application.config.action_mailer.delivery_method == :smtp; raise "SMTP domain default missing" unless settings[:domain] == "smoke.example.invalid"; raise "Sender default missing" unless Decidim.mailer_sender == "no-reply@smoke.example.invalid"')
             if "SMOKE_SIGNIN_HTML_AND_ASSET_OK" not in runner(route_check):
-                raise RuntimeError("Email setup notice did not clear after configuration")
-            print("PASS: adding SMTP enables verified TLS, applies domain defaults and clears the setup notice")
+                raise RuntimeError("Sign-in page failed after email configuration")
+            print("PASS: adding SMTP enables verified TLS, applies domain defaults and preserves sign-in")
+
+            if "SMOKE_ORGANISATION_SETUP_OK" not in runner(setup_check):
+                raise RuntimeError("Organisation setup with configured email failed")
+            print("PASS: configured organisation invitations and resend enqueue normally")
 
             initial_state = r'''require "json"; count = Decidim::System::Admin.count; orgs = Decidim::Organization.count; raise "Expected exactly one system admin, got #{count}" unless count == 1; raise "Expected no sample organisations, got #{orgs}" unless orgs.zero?; puts "SMOKE_STATE=#{JSON.generate(admins: count, organisations: orgs)}"'''
             state = runner(initial_state)

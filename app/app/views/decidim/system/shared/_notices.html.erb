@@ -1,15 +1,15 @@
 <%= display_flash_messages %>
 
-<% if Rails.env.production? && !Rails.application.config.x.deployment[:mail_enabled] %>
+<% if !setup_sign_in_page? && setup_mail_pending? %>
   <%= cell "decidim/announcement",
-           "Email setup is pending. You can sign in and create your organisation. Configure email in Coolify before inviting administrators or participants; invitations, password resets and notifications cannot be delivered yet.",
+           setup_text("email_notice"),
            callout_class: "warning" %>
 <% end %>
 
-<% if Decidim::Organization.none? %>
+<% if !setup_sign_in_page? && setup_first_run? %>
   <% guide = link_to t(".our_getting_started_guide"),
-                     "https://docs.decidim.org/",
-                     target: :blank %>
+                     "https://github.com/jokroese/decidim-coolify#set-up",
+                     target: "_blank", rel: "noopener noreferrer" %>
 
   <%= cell "decidim/announcement", t(".no_organization_warning_html", guide:), callout_class: "warning" %>
 <% end %>

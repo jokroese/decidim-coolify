@@ -64,6 +64,7 @@ def environment_fixture() -> dict[str, str]:
         key: "aB7cD9eF2gH4iJ6k" * 4
         for key in compose_variable_names() if key.startswith("SERVICE_PASSWORD")
     })
+    fixture["SERVICE_HEX_128_RAILS"] = "a1b2c3d4" * 16
     return fixture
 
 
