@@ -2,7 +2,7 @@
 
 For developers and technical helpers responsible for a collective's installation. For the collective's responsibilities, read [Looking after your site](../OPERATIONS.md).
 
-These procedures require Docker Compose and server administration experience. They have not yet been verified on a live Coolify installation. See [verification status](../VERIFICATION.md) before using them.
+These procedures require Docker Compose and server administration experience. They have not yet been verified on a live Coolify installation. Complete the [deployment-readiness checks](../CONTRIBUTING.md#help-make-setup-ready) on the target installation.
 
 ## Before the first installation
 

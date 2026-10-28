@@ -22,7 +22,7 @@ Read the documents relevant to the change:
 | Setup or collective-facing instructions | [README.md](README.md), [OPERATIONS.md](OPERATIONS.md) |
 | Code, builds, dependencies or releases | [CONTRIBUTING.md](CONTRIBUTING.md), including its source map |
 | Runtime configuration | [compose.yaml](compose.yaml), [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
-| Deployment, migration or recovery | [docs/OPERATIONS.md](docs/OPERATIONS.md), [VERIFICATION.md](VERIFICATION.md) |
+| Deployment, migration or recovery | [docs/OPERATIONS.md](docs/OPERATIONS.md), [deployment readiness](CONTRIBUTING.md#help-make-setup-ready) |
 
 ## Repository constraints and pitfalls
 
@@ -30,26 +30,19 @@ Read the documents relevant to the change:
 - Git owns the shared, version-and-digest-pinned image for web, worker and scheduler. Coolify owns installation settings and secrets. Collectives must not need to build or publish their own image.
 - Keep the Coolify web domain as the single public-URL source. Fix domain propagation instead of introducing another setting to keep in sync.
 - Preserve installed migration filenames. Follow [Preparing a Decidim upgrade](CONTRIBUTING.md#preparing-a-decidim-upgrade) for dependency and migration changes; do not delete and regenerate migrations.
-- `app/bin/dev` runs upgrade and migration tasks and is not a supported local setup shortcut. Use the documented container test loop.
+- Use root `bin/dev` for the editable environment and `bin/check` for verification. Application-level generated setup scripts are not an alternative workflow.
 - Keep failed deliveries, migrations and background jobs visible; do not convert failures into apparent success.
 - Rendered production Compose configuration can contain secrets. Keep it, credentials, uploads, generated assets and installed dependencies out of commits and reports.
 
 ## Verification
 
-Run commands from the task worktree root. For configuration and code changes, the quick checks are:
+Run commands from the task worktree root. Use `bin/check quick` for configuration and code changes, `bin/check docs` for documentation, and `bin/check full` for runtime changes. The supported host prerequisites are Python 3, Git and Docker with Compose 2.32 or newer; Ruby and Node run in containers.
 
-```sh
-python3 validate.py --allow-unpublished-image
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
+Use [Choose checks for the change](CONTRIBUTING.md#choose-checks-for-the-change) for further checks and [Build and check a change](CONTRIBUTING.md#build-and-check-a-change) for commands and platform selection. Test runtime changes against an image rebuilt from the changed source, including the failure that prompted the change. Builds use unique tags and tests pin immutable image IDs; do not reintroduce a shared mutable test-image default.
 
-These require Python 3 and Docker Compose v2. Validation uses disposable settings, does not read the project's `.env` and does not start containers. Deployment validation must pass without `--allow-unpublished-image`.
+Use [Local development](CONTRIBUTING.md#local-development) for browser inspection. Development data and secrets are isolated per worktree; normal shutdown retains them. Only an explicit development reset removes them. Smoke tests create and remove their own disposable projects; never point them at a running installation or remove another project's resources.
 
-Select further checks using [Choose checks for the change](CONTRIBUTING.md#choose-checks-for-the-change); use [Build and check a change](CONTRIBUTING.md#build-and-check-a-change) for exact build, Ruby test and smoke-test commands. Builds and smoke tests require a running Docker daemon. Test runtime changes against an image rebuilt from the changed source, including the failure that prompted the change.
-
-For documentation-only changes, check links, anchors and commands against the source; no image build is needed. The smoke test creates and removes its own disposable project and volumes. Do not direct it at a running installation or remove another project's resources.
-
-Smoke tests do not establish working Coolify routing, real email delivery or recovery. Record new deployment or release evidence in [VERIFICATION.md](VERIFICATION.md), including revision/image, architecture, results and unverified steps. Historical results do not verify new changes.
+Smoke tests do not establish working Coolify routing, real email delivery or recovery. Use CI runs for automated results. Report manual checks and remaining limits in the PR description or release notes, identifying the tested revision/image and architecture. Update the relevant guide when behaviour or operational requirements change; do not append test-run diaries to repository documentation.
 
 ## Documentation and handover
 

@@ -6,7 +6,7 @@ Coolify pulls a prebuilt application image. Collectives do not need to compile D
 
 **Pilot releases are available** for Linux amd64 and ARM64. `compose.yaml` pins a public image by version and digest; no registry credentials are needed. See the [release notes](https://github.com/jokroese/decidim-coolify/releases).
 
-**Pilot setup:** public routing, real email delivery and recovery still need verification on Coolify. [Verification status](VERIFICATION.md).
+**Pilot setup:** public routing, real email delivery and recovery still need verification on Coolify. [Remaining setup checks](CONTRIBUTING.md#help-make-setup-ready).
 
 The revised sign-in and organisation forms described below are implemented in source and awaiting an image release. The currently pinned published image still has the original forms.
 

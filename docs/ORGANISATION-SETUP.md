@@ -6,7 +6,7 @@ This document records why the system sign-in and organisation creation forms dif
 
 The starting evidence is one person's walkthrough of a deployed new-organisation form on 28 October 2026, supported by the supplied HTML and inspection of the pinned Decidim source. This is concrete usability feedback, not a representative user study. Do not publish the original HTML: it contains an administrator email address, a host and an authenticity token. Use synthetic data in screenshots and reproductions.
 
-The local implementation is a candidate contribution. No upstream proposal, issue or PR has been submitted or accepted. See [verification](../VERIFICATION.md) for checks actually completed. These changes require a new application image; editing the deployment Compose file alone does not install them.
+The local implementation is a candidate contribution. No upstream proposal, issue or PR has been submitted or accepted. These changes require a new application image; editing the deployment Compose file alone does not install them.
 
 ## What belongs to whom
 
@@ -106,7 +106,7 @@ Code describes what runs, and tests demonstrate selected behaviours. Neither rec
 
 1. **User guidance:** labels and help on the form, plus the short setup and email procedure in the README. A person should not need this design document to create an organisation.
 2. **Design rationale:** this document, including the audience classification, trade-offs and deliberately unchanged policies.
-3. **Executable evidence:** behaviour tests, build/smoke results and browser checks recorded in `VERIFICATION.md`. Record limitations rather than inferring untested outcomes.
+3. **Executable evidence:** behaviour tests and [CI build/smoke results](https://github.com/jokroese/decidim-coolify/actions/workflows/images.yml). Put browser checks and unverified steps in the corresponding PR.
 4. **Contribution history:** link each proposal, issue and PR below once it actually exists. Each PR should include its own before/after description and checks, so review does not depend on this chat.
 
 Keep these records alongside the change. Do not duplicate implementation line by line in prose. Comments explain only non-obvious decisions such as deferring delivery without accepting the account.
